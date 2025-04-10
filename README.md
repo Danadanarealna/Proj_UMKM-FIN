@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # finance
 
 A new Flutter project.
@@ -14,3 +15,7 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+=======
+# Proj_UMKM-FIN
+Assigment
+>>>>>>> 5731c3db6ee65cf53b3d67d7cc103e24533362a5
