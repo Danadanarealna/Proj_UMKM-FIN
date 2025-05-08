@@ -1,7 +1,7 @@
 <<<<<<< HEAD
 # finance
 
-A new Flutter project.
+Workshop Project
 
 ## Getting Started
 
