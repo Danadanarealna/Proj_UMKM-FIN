@@ -3,6 +3,13 @@ import 'auth.dart';
 import 'add_transaction_screen.dart';
 import 'delete_transaction_screen.dart';
 import 'update_transaction_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
+import 'api.dart';
+import 'dart:io';
+import 'dart:async';
 
 void main() {
   runApp(const FinanceDashboardApp());
@@ -34,35 +41,109 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   bool _showIncome = true;
-  String _selectedId = '#TRX001';
-  String _selectedAmount = '+ \$2,500';
-  String _selectedStatus = 'Done';
-  String _selectedDate = '12 Jun 2023';
+  String _selectedId = '';
+  String _selectedAmount = '';
+  String _selectedStatus = '';
+  String _selectedDate = '';
+  // late Future<List<Transaction>> _transactionsFuture;
+  final _prefs = SharedPreferences.getInstance();
+  String? _authToken;
+  List<Transaction> _transactions = [];
+  bool _isLoading = true;
 
-  // State-managed transaction lists
-  List<_Transaction> incomeTransactions = [
-    _Transaction('#TRX001', '+ \$2,500', 'Done', '12 Jun 2023', 'Cash', true),
-    _Transaction('#TRX002', '+ \$1,200', 'Pending', '13 Jun 2023', 'Credit', true),
-    _Transaction('#TRX003', '+ \$800', 'Cancelled', '14 Jun 2023', 'Cash', true),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadTransactions();
+  }
 
-  List<_Transaction> expenseTransactions = [
-    _Transaction('#TRX101', '- \$450', 'Done', '12 Jun 2023', 'Cash', false),
-    _Transaction('#TRX102', '- \$600', 'Pending', '13 Jun 2023', 'Credit', false),
-    _Transaction('#TRX103', '- \$150', 'Cancelled', '14 Jun 2023', 'Cash', false),
-  ];
 
-  void _updateSelectedTransaction(
-    String id,
-    String amount,
-    String status,
-    String date,
-  ) {
+Future<void> _loadTransactions() async {
+  if (mounted) setState(() => _isLoading = true);
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+    
+    if (token == null) {
+      if (mounted) showAuthError(context);
+      return;
+    }
+
+    final response = await http.get(
+      Uri.parse('$apiBaseUrl/transactions'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as List;
+      if (mounted) {
+        setState(() {
+          _transactions = data.map((t) => Transaction.fromJson(t)).toList();
+          _isLoading = false;
+        });
+      }
+    } else {
+      if (mounted) {
+        showError(context, 
+          'Server error: ${response.statusCode}\n${response.body}');
+      }
+    }
+  } on FormatException catch (e) {
+    if (mounted) showError(context, 'Data format error: ${e.message}');
+  } on SocketException {
+    if (mounted) showError(context, 'Network connection failed');
+  } on TimeoutException {
+    if (mounted) showError(context, 'Request timed out');
+  } catch (e) {
+    if (mounted) showError(context, 'Unexpected error: ${e.toString()}');
+  } finally {
+    if (mounted) setState(() => _isLoading = false);
+  }
+}
+
+// Add these helper methods
+void showError(BuildContext context, String message) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(message), backgroundColor: Colors.red),
+  );
+}
+
+void showAuthError(BuildContext context) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Authentication required')),
+  );
+}
+
+  // Future<List<Transaction>> _fetchTransactions() async {
+  //   final prefs = await _prefs;
+  //   _authToken = prefs.getString('token');
+
+  //   final response = await http.get(
+  //     Uri.parse('$apiBaseUrl/transactions'),
+  //     headers: {'Authorization': 'Bearer $_authToken'},
+  //   );
+
+  //   if (response.statusCode == 200) {
+  //     final data = jsonDecode(response.body) as List;
+  //     return data.map((t) => Transaction.fromJson(t)).toList();
+  //   }
+  //   return [];
+  // }
+
+double get _totalIncome => _transactions
+    .where((t) => t.isIncome && (t.status == 'Done'))
+    .fold(0.0, (sum, t) => sum + t.amount.abs());
+
+double get _totalExpense => _transactions
+    .where((t) => !t.isIncome && (t.status == 'Done'))
+    .fold(0.0, (sum, t) => sum + t.amount.abs());
+
+  void _updateSelectedTransaction(Transaction transaction) {
     setState(() {
-      _selectedId = id;
-      _selectedAmount = amount;
-      _selectedStatus = status;
-      _selectedDate = date;
+      _selectedId = transaction.id;
+      _selectedAmount = '${transaction.amount > 0 ? '+' : '-'} \$${transaction.amount.abs().toStringAsFixed(2)}';
+      _selectedStatus = transaction.status;
+      _selectedDate = DateFormat('dd MMM yyyy').format(transaction.date);
     });
   }
 
@@ -114,21 +195,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                               );
                               if (result != null) {
-                                setState(() {
-                                  final newId =
-                                      '#TRX${(_showIncome ? incomeTransactions.length + 1 : expenseTransactions.length + 1).toString().padLeft(3, '0')}';
-                                  final transaction = _Transaction(
-                                    newId,
-                                    result['amount'],
-                                    result['status'],
-                                    result['date'],
-                                    result['type'],
-                                    _showIncome,
-                                  );
-                                  _showIncome
-                                      ? incomeTransactions.add(transaction)
-                                      : expenseTransactions.add(transaction);
-                                });
+                                _loadTransactions();
                               }
                             },
                           ),
@@ -141,15 +208,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) => DeleteTransactionScreen(
-                                    transactions: [...incomeTransactions, ...expenseTransactions],
+                                    transactions: _transactions,
                                   ),
                                 ),
                               );
                               if (result != null) {
-                                setState(() {
-                                  incomeTransactions.removeWhere((t) => t.id == result.id);
-                                  expenseTransactions.removeWhere((t) => t.id == result.id);
-                                });
+                              _loadTransactions();
                               }
                             },
                           ),
@@ -158,20 +222,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             icon: Icons.check,
                             color: const Color(0xFF10B981),
                             onPressed: () async {
-                              final pending = [...incomeTransactions, ...expenseTransactions]
-                                  .where((t) => t.status == 'Pending')
-                                  .toList();
+                                final pending = _transactions
+                                .where((t) => t.status == 'Pending')
+                                .toList();
                               final result = await Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) =>
-                                      UpdateTransactionScreen(pendingTransactions: pending),
+                                  builder: (context) => UpdateTransactionScreen(pendingTransactions: pending),
                                 ),
                               );
                               if (result != null && result['transaction'] != null) {
-                                setState(() {
-                                  result['transaction']!.status = result['status'];
-                                });
+                                _loadTransactions();
                               }
                             },
                           ),
@@ -181,7 +242,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(height: 16),
                   Container(
-      decoration: BoxDecoration(
+                    decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(12)),
                     child: Row(
@@ -197,7 +258,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 boxShadow: _showIncome
                                     ? [
                                         BoxShadow(
-                                          color: Colors.black.withOpacity(0.1),
+                                          color: Colors.black.withAlpha(25),
                                           blurRadius: 4,
                                           offset: const Offset(0, 2),
                                         )
@@ -207,12 +268,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               child: Column(
                                 children: [
                                   const Text(
-                                    'Pemasukan',
+                                    'Income',
                                     style: TextStyle(fontWeight: FontWeight.w500),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    '\$4,500',
+                                    '\$${_totalIncome.toStringAsFixed(2)}',
                                     style: TextStyle(
                                       fontWeight: FontWeight.w600,
                                       color: Colors.green[500]),
@@ -233,7 +294,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 boxShadow: !_showIncome
                                     ? [
                                         BoxShadow(
-                                          color: Colors.black.withOpacity(0.1),
+                                          color: Colors.black.withAlpha(25),
                                           blurRadius: 4,
                                           offset: const Offset(0, 2),
                                         )
@@ -243,12 +304,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               child: Column(
                                 children: [
                                   const Text(
-                                    'Pengeluaran',
+                                    'Expense',
                                     style: TextStyle(fontWeight: FontWeight.w500),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    '\$1,200',
+                                    '\$${_totalExpense.toStringAsFixed(2)}',
                                     style: TextStyle(
                                       fontWeight: FontWeight.w600,
                                       color: Colors.red[500]),
@@ -275,7 +336,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
+                            color: Colors.black.withAlpha(12),
                             blurRadius: 6,
                             offset: const Offset(0, 2),
                           ),
@@ -288,7 +349,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             child: Row(
                               children: [
                                 Text(
-                                  'List Transaksi',
+                                  'List Transaction',
                                   style: TextStyle(
                                     fontWeight: FontWeight.w600,
                                     color: const Color(0xFF1E293B)),
@@ -297,9 +358,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           SizedBox(
                             height: 300,
-                            child: _showIncome
-                                ? _buildIncomeTransactions()
-                                : _buildExpenseTransactions(),
+                            child: _isLoading
+                                ? const CircularProgressIndicator()
+                                : _buildTransactionList(
+                                    _transactions
+                                        .where((t) => _showIncome ? t.isIncome : !t.isIncome)
+                                        .toList(),
+                                  ),
                           ),
                         ],
                       ),
@@ -312,7 +377,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
+                            color: Colors.black.withAlpha(12),
                             blurRadius: 6,
                             offset: const Offset(0, 2),
                           ),
@@ -325,7 +390,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                'Detail Transaksi',
+                                'Transaction Detail',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   color: const Color(0xFF1E293B)),
@@ -339,7 +404,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           const SizedBox(height: 12),
                           _DetailRow(
-                            label: 'Jumlah:',
+                            label: 'Amount:',
                             value: _selectedAmount,
                             valueStyle: TextStyle(
                               fontWeight: FontWeight.w500,
@@ -367,7 +432,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           const SizedBox(height: 12),
                           _DetailRow(
-                            label: 'Tanggal:',
+                            label: 'Date:',
                             value: _selectedDate,
                             valueStyle: const TextStyle(fontWeight: FontWeight.w500),
                           ),
@@ -419,78 +484,72 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildIncomeTransactions() {
-    return _buildTransactionList(incomeTransactions);
-  }
-
-  Widget _buildExpenseTransactions() {
-    return _buildTransactionList(expenseTransactions);
-  }
-
-  Widget _buildTransactionList(List<_Transaction> transactions) {
-    return ListView.builder(
-      itemCount: transactions.length,
-      itemBuilder: (context, index) {
-        final transaction = transactions[index];
-        return InkWell(
-          onTap: () => _updateSelectedTransaction(
-            transaction.id,
-            transaction.amount,
-            transaction.status,
-            transaction.date,
-          ),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: Colors.grey[200]!,
-                  width: 1),
+// Updated transaction list builder
+Widget _buildTransactionList(List<Transaction> transactions) {
+  return ListView.builder(
+    shrinkWrap: true,
+    physics: const AlwaysScrollableScrollPhysics(),
+    itemCount: transactions.length,
+    itemBuilder: (context, index) {
+      final transaction = transactions[index];
+      return InkWell(
+        onTap: () => _updateSelectedTransaction(transaction),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: Colors.grey[200]!,
+                width: 1,
               ),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    transaction.id,
-                    style: const TextStyle(fontSize: 14)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  transaction.id,
+                  style: const TextStyle(fontSize: 14),
                 ),
-                Expanded(
-                  child: Text(
-                    transaction.amount,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: transaction.amount.startsWith('+')
-                          ? Colors.green[500]
-                          : Colors.red[500]),
+              ),
+              Expanded(
+                child: Text(
+                  '${transaction.isIncome ? '+' : '-'} \$${transaction.amount.abs().toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: transaction.isIncome 
+                        ? Colors.green[500] 
+                        : Colors.red[500],
                   ),
                 ),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _getStatusColor(transaction.status),
-                      borderRadius: BorderRadius.circular(12)),
-                    child: Text(
-                      transaction.status,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _getStatusTextColor(transaction.status)),
+              ),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _getStatusColor(transaction.status),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    transaction.status,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _getStatusTextColor(transaction.status),
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        );
-      },
-    );
-  }
-
+        ),
+      );
+    },
+  );
+}
   Color _getStatusColor(String status) {
     switch (status) {
       case 'Pending':
@@ -517,23 +576,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 }
-
-class _Transaction {
+class Transaction {
   final String id;
-  final String amount;
+  final double amount;
   String status;
-  final String date;
+  final DateTime date;
   final String type;
   final bool isIncome;
 
-  _Transaction(
-    this.id,
-    this.amount,
-    this.status,
-    this.date,
-    this.type,
-    this.isIncome,
-  );
+  Transaction({
+    required this.id,
+    required this.amount,
+    required this.status,
+    required this.date,
+    required this.type,
+    required this.isIncome,
+  });
+
+factory Transaction.fromJson(Map<String, dynamic> json) {
+  try {
+    return Transaction(
+      id: json['id'].toString(),
+      amount: double.parse(json['amount'].toString()),
+      status: json['status'],
+      date: DateFormat('dd MMM yyyy', 'en_US').parse(json['date'].toString()),
+      type: json['type'],
+      isIncome: double.parse(json['amount'].toString()) > 0,
+    );
+  } catch (e) {
+    print('Error parsing transaction date: ${json['date']}');
+    print('Error details: $e');
+    rethrow;
+  }
+}
 }
 
 class _ActionButton extends StatelessWidget {

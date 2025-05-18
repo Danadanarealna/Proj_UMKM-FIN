@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:finance/main.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'api.dart';
 
 void main() {
   runApp(const UMKMFinanceApp());
@@ -81,41 +85,48 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
 
   Future<void> _handleLogin() async {
-    final email = _loginEmailController.text.trim();
-    final password = _loginPasswordController.text.trim();
+  final email = _loginEmailController.text.trim();
+  final password = _loginPasswordController.text.trim();
 
-    if (email.isEmpty || password.isEmpty) {
-      _showAlert('Please enter both email and password');
-      return;
-    }
+  if (email.isEmpty || password.isEmpty) {
+    _showAlert('Please enter both email and password');
+    return;
+  }
 
-    setState(() {
-      _isLoading = true;
-    });
+  setState(() => _isLoading = true);
 
-    // Dummy authentication
-    await Future.delayed(const Duration(seconds: 1));
+  try {
+    final response = await http.post(
+      Uri.parse('$apiBaseUrl/login'),
+      body: jsonEncode({'email': email, 'password': password}),
+      headers: {'Content-Type': 'application/json'},
+    );
 
-    setState(() {
-      _isLoading = false;
-    });
-
-    if (email == 'demo@umkm.com' && password == 'password123') {
-       if (!mounted) return; // Check if the widget is still mounted
-      // Successful login - navigate to dashboard
-      Navigator.of(context).pushReplacement(
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('token', data['token']);
+      
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
         MaterialPageRoute(builder: (context) => const DashboardScreen()),
       );
     } else {
-      _showAlert('Invalid credentials. Try demo@umkm.com / password123');
+      _showAlert(jsonDecode(response.body)['message'] ?? 'Login failed');
     }
+  } catch (e) {
+    _showAlert('Connection error');
+  } finally {
+    if (mounted) setState(() => _isLoading = false);
   }
+}
 
   Future<void> _handleSignup() async {
-    final email = _signupEmailController.text.trim();
-    final username = _signupUsernameController.text.trim();
-    final password = _signupPasswordController.text.trim();
-    final confirmPassword = _signupConfirmPasswordController.text.trim();
+  final email = _signupEmailController.text.trim();
+  final username = _signupUsernameController.text.trim();
+  final password = _signupPasswordController.text.trim();
+  final confirmPassword = _signupConfirmPasswordController.text.trim();
 
     if (email.isEmpty || username.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
       _showAlert('Please fill in all fields');
@@ -136,20 +147,29 @@ class _AuthWrapperState extends State<AuthWrapper> {
       _isLoading = true;
     });
 
-    // Simulate account creation
-    await Future.delayed(const Duration(seconds: 1));
+    try {
+    final response = await http.post(
+      Uri.parse('$apiBaseUrl/register'),
+      body: jsonEncode({
+        'name': username,
+        'email': email,
+        'password': password
+      }),
+      headers: {'Content-Type': 'application/json'},
+    );
 
-    setState(() {
-      _isLoading = false;
-      _showLogin = true;
-      _signupEmailController.clear();
-      _signupUsernameController.clear();
-      _signupPasswordController.clear();
-      _signupConfirmPasswordController.clear();
-    });
-
-    _showAlert('Account created successfully! Please log in.');
+    if (response.statusCode == 200) {
+      _showAlert('Account created! Please login.');
+      _toggleLoginSignup();
+    } else {
+      _showAlert(jsonDecode(response.body)['message'] ?? 'Registration failed');
+    }
+  } catch (e) {
+    _showAlert('Connection error');
+  } finally {
+    if (mounted) setState(() => _isLoading = false);
   }
+}
 
   void _showAlert(String message) {
     showDialog(

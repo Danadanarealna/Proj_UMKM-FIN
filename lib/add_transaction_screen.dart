@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'api.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   final bool isIncome;
@@ -64,7 +68,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               ),
               DropdownButtonFormField<String>(
                 value: _selectedStatus,
-                items: ['Completed', 'Pending'].map((String value) {
+                items: ['Done', 'Pending'].map((String value) {
                   return DropdownMenuItem<String>(
                     value: value,
                     child: Text(value),
@@ -75,18 +79,41 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               ),
               const SizedBox(height: 20),
               ElevatedButton(
-                onPressed: () {
-                  if (_formKey.currentState!.validate()) {
-                    Navigator.pop(context, {
-                      'amount': widget.isIncome 
-                          ? '+ \$${_amountController.text}'
-                          : '- \$${_amountController.text}',
+                onPressed: () async {
+                if (_formKey.currentState!.validate()) {
+                final prefs = await SharedPreferences.getInstance();
+                final token = prefs.getString('token');
+
+                try {
+                  final response = await http.post(
+                    Uri.parse('$apiBaseUrl/transactions'),
+                    headers: {
+                      'Authorization': 'Bearer $token',
+                      'Content-Type': 'application/json'
+                    },
+                    body: jsonEncode({  'amount': widget.isIncome 
+                          ? double.parse(_amountController.text)
+                          : -double.parse(_amountController.text),
+                      'type': _selectedType,
                       'status': _selectedStatus,
                       'date': DateFormat('dd MMM yyyy').format(_selectedDate),
-                      'type': _selectedType,
-                    });
+                    }),
+                  );
+                  if (response.statusCode == 200 || response.statusCode == 201) {
+                    if (mounted) Navigator.pop(context, true);
+                  } else {
+                    final error = jsonDecode(response.body)['message'] ?? 'Transaction failed';
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(error)),
+                    );
                   }
-                },
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Network error')),
+                  );
+                }
+              }
+              },
                 child: const Text('Add Transaction'),
               ),
             ],
