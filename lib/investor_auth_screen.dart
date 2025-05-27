@@ -3,30 +3,27 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'api.dart';
-import 'main.dart'; // For UMKM DashboardScreen
-import 'investor_auth_screen.dart'; // New screen for investor login
-import 'app_state.dart'; // For managing user type - ensure this file exists and is set up
+import 'investor_dashboard_screen.dart'; // To navigate after investor login
+import 'app_state.dart'; // For managing user type
 
-class AuthWrapper extends StatefulWidget {
-  const AuthWrapper({super.key});
+
+class InvestorAuthScreen extends StatefulWidget {
+  const InvestorAuthScreen({super.key});
 
   @override
-  State<AuthWrapper> createState() => _AuthWrapperState();
+  State<InvestorAuthScreen> createState() => _InvestorAuthScreenState();
 }
 
-class _AuthWrapperState extends State<AuthWrapper> {
+class _InvestorAuthScreenState extends State<InvestorAuthScreen> {
   bool _showLogin = true;
   bool _isLoading = false;
 
   final TextEditingController _loginEmailController = TextEditingController();
   final TextEditingController _loginPasswordController = TextEditingController();
   final TextEditingController _signupEmailController = TextEditingController();
-  final TextEditingController _signupUsernameController = TextEditingController(); // UMKM Owner Name / User's Name
+  final TextEditingController _signupNameController = TextEditingController(); // Investor Name
   final TextEditingController _signupPasswordController = TextEditingController();
   final TextEditingController _signupConfirmPasswordController = TextEditingController();
-  final TextEditingController _signupUmkmNameController = TextEditingController(); // UMKM Business Name
-  final TextEditingController _signupUmkmContactController = TextEditingController(); // UMKM Contact
-
 
   bool _obscureLoginPassword = true;
   bool _obscureSignupPassword = true;
@@ -37,11 +34,9 @@ class _AuthWrapperState extends State<AuthWrapper> {
     _loginEmailController.dispose();
     _loginPasswordController.dispose();
     _signupEmailController.dispose();
-    _signupUsernameController.dispose();
+    _signupNameController.dispose();
     _signupPasswordController.dispose();
     _signupConfirmPasswordController.dispose();
-    _signupUmkmNameController.dispose();
-    _signupUmkmContactController.dispose();
     super.dispose();
   }
 
@@ -51,7 +46,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
     });
   }
 
-  void _toggleLoginPasswordVisibility() {
+   void _toggleLoginPasswordVisibility() {
     setState(() {
       _obscureLoginPassword = !_obscureLoginPassword;
     });
@@ -69,88 +64,80 @@ class _AuthWrapperState extends State<AuthWrapper> {
     });
   }
 
-  Future<void> _handleUmkmLogin() async {
+
+  Future<void> _handleInvestorLogin() async {
     final email = _loginEmailController.text.trim();
     final password = _loginPasswordController.text.trim();
 
     if (email.isEmpty || password.isEmpty) {
-      _showAlert('Please enter both email and password for UMKM login.');
+      _showAlert('Please enter both email and password for investor login.');
       return;
     }
     setState(() => _isLoading = true);
 
     try {
       final response = await http.post(
-        Uri.parse('$apiBaseUrl/login'), // CORRECTED ENDPOINT for UMKM login
+        Uri.parse('$apiBaseUrl/investor/login'), // Investor endpoint
         body: jsonEncode({'email': email, 'password': password}),
         headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
       );
-
       if (mounted) {
         setState(() => _isLoading = false);
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
           final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('token', data['token']); // Assuming token key is 'token' from Laravel
-          await prefs.setString('user_type', 'umkm');
+          await prefs.setString('token', data['access_token']);
+          await prefs.setString('user_type', 'investor'); // Store user type
           await prefs.setString('user_data', jsonEncode(data['user']));
 
-
-          AppState().setUserType('umkm');
+          AppState().setUserType('investor');
 
           if (mounted) {
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (context) => const DashboardScreen()),
+              MaterialPageRoute(builder: (context) => const InvestorDashboardScreen()),
             );
           }
         } else {
           final errorData = jsonDecode(response.body);
-          _showAlert(errorData['message'] ?? 'UMKM Login failed. Please check your credentials.');
+          _showAlert(errorData['message'] ?? 'Investor Login failed.');
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        _showAlert('Connection error during UMKM login: ${e.toString()}');
+        _showAlert('Connection error during investor login: ${e.toString()}');
       }
     }
   }
 
-  Future<void> _handleUmkmSignup() async {
+  Future<void> _handleInvestorSignup() async {
     final email = _signupEmailController.text.trim();
-    final name = _signupUsernameController.text.trim(); // User's full name
+    final name = _signupNameController.text.trim();
     final password = _signupPasswordController.text.trim();
     final confirmPassword = _signupConfirmPasswordController.text.trim();
-    final umkmBusinessName = _signupUmkmNameController.text.trim(); // Specific UMKM business name
-    final umkmContact = _signupUmkmContactController.text.trim();
-
 
     if (email.isEmpty || name.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
-      _showAlert('Please fill in Owner Name, Email, Password, and Confirm Password.');
+      _showAlert('Please fill in all fields for investor registration.');
       return;
     }
     if (password != confirmPassword) {
-      _showAlert('Passwords do not match.'); // Client-side check
+      _showAlert('Passwords do not match.');
       return;
     }
-    // Assuming your Laravel validation uses min:6 for UMKM password as per AuthController
-    if (password.length < 6) {
-      _showAlert('Password must be at least 6 characters.');
+     if (password.length < 8) {
+      _showAlert('Password must be at least 8 characters.');
       return;
     }
     setState(() => _isLoading = true);
 
     try {
       final response = await http.post(
-        Uri.parse('$apiBaseUrl/register'), // CORRECTED ENDPOINT for UMKM registration
+        Uri.parse('$apiBaseUrl/investor/register'), // Investor endpoint
         body: jsonEncode({
-          'name': name, // This is the user's name
+          'name': name,
           'email': email,
           'password': password,
-          'password_confirmation': confirmPassword, // <<< FIXED: Added password_confirmation
-          'umkm_name': umkmBusinessName.isNotEmpty ? umkmBusinessName : null, // Send if not empty
-          'contact': umkmContact.isNotEmpty ? umkmContact : null, // Send if not empty
         }),
         headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
       );
@@ -158,18 +145,15 @@ class _AuthWrapperState extends State<AuthWrapper> {
       if (mounted) {
         setState(() => _isLoading = false);
         if (response.statusCode == 201) {
-          _showAlert('UMKM account created successfully! Please login.');
+          _showAlert('Investor account created successfully! Please login.');
           _toggleLoginSignup();
         } else {
           final errorData = jsonDecode(response.body);
-           String errorMessage = 'UMKM Registration failed.';
+          String errorMessage = 'Investor Registration failed.';
            if (errorData['errors'] != null && errorData['errors'] is Map) {
                 Map<String, dynamic> errors = errorData['errors'];
                 if (errors.isNotEmpty) {
-                    // Display the first error message encountered
-                    // Laravel validation errors are field-specific, e.g., errors['email'][0]
-                    // This takes the first message from the first field that has an error.
-                    errorMessage = errors.entries.first.value[0];
+                    errorMessage = errors.values.first[0];
                 }
             } else if (errorData['message'] != null) {
                 errorMessage = errorData['message'];
@@ -180,7 +164,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        _showAlert('Connection error during UMKM registration: ${e.toString()}');
+        _showAlert('Connection error during investor registration: ${e.toString()}');
       }
     }
   }
@@ -205,17 +189,31 @@ class _AuthWrapperState extends State<AuthWrapper> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: Text(_showLogin ? 'Investor Login' : 'Investor Registration'),
+        leading: IconButton( // Add a back button
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            } else {
+              // Fallback if it's the first screen (though unlikely here)
+              // Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => AuthWrapper()));
+            }
+          },
+        ),
+      ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400), // Good for web/tablet view
+             child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
               child: AnimatedCrossFade(
                 duration: const Duration(milliseconds: 300),
                 crossFadeState: _showLogin ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-                firstChild: _buildUmkmLoginPage(),
-                secondChild: _buildUmkmSignupPage(),
+                firstChild: _buildInvestorLoginPage(),
+                secondChild: _buildInvestorSignupPage(),
               ),
             ),
           ),
@@ -224,24 +222,30 @@ class _AuthWrapperState extends State<AuthWrapper> {
     );
   }
 
-  Widget _buildUmkmLoginPage() {
+  Widget _buildInvestorLoginPage() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildLogo(),
         const SizedBox(height: 24),
-        Text(
-          'UMKM Login', // Simplified title
+         Text(
+          'Welcome, Investor!',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Find promising UMKMs to invest in.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
         ),
         const SizedBox(height: 32),
         _buildInputField(
           label: 'Email',
           icon: Icons.email_outlined,
           controller: _loginEmailController,
-          hintText: 'your@email.com',
+          hintText: 'your.investor@email.com',
           keyboardType: TextInputType.emailAddress,
         ),
         const SizedBox(height: 16),
@@ -250,151 +254,121 @@ class _AuthWrapperState extends State<AuthWrapper> {
           controller: _loginPasswordController,
           obscureText: _obscureLoginPassword,
           onToggleVisibility: _toggleLoginPasswordVisibility,
-          minLength: 6, // Reflects UMKM password min length
         ),
         const SizedBox(height: 24),
         ElevatedButton(
-          onPressed: _isLoading ? null : _handleUmkmLogin,
+          onPressed: _isLoading ? null : _handleInvestorLogin,
           style: ElevatedButton.styleFrom(
-            backgroundColor: Theme.of(context).colorScheme.primary,
+            backgroundColor: Theme.of(context).colorScheme.secondary, // Different color for investor
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 16),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
           child: _isLoading
               ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
-              : const Text('Login as UMKM'),
+              : const Text('Login as Investor'),
         ),
         const SizedBox(height: 16),
         OutlinedButton(
           onPressed: _toggleLoginSignup,
-           style: OutlinedButton.styleFrom(
-            side: BorderSide(color: Theme.of(context).colorScheme.primary),
+          style: OutlinedButton.styleFrom(
+            side: BorderSide(color: Theme.of(context).colorScheme.secondary),
             padding: const EdgeInsets.symmetric(vertical: 16),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
-          child: const Text('Create UMKM Account'),
-        ),
-        const SizedBox(height: 24),
-        const Divider(),
-        const SizedBox(height: 16),
-        TextButton(
-           onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const InvestorAuthScreen()),
-            );
-          },
-          child: Text(
-            'Login / Register as Investor', // Clearer text
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.bold),
-          ),
+          child: Text('Create Investor Account', style: TextStyle(color: Theme.of(context).colorScheme.secondary)),
         ),
       ],
     );
   }
 
-  Widget _buildUmkmSignupPage() {
+  Widget _buildInvestorSignupPage() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-         Row(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.arrow_back),
-              onPressed: _toggleLoginSignup,
-            ),
-            const SizedBox(width: 8),
-            Text('Create UMKM Account', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-          ],
-        ),
-        const SizedBox(height: 24),
+        // Row( // Title is in AppBar now
+        //   children: [
+        //     IconButton(
+        //       icon: const Icon(Icons.arrow_back),
+        //       onPressed: _toggleLoginSignup,
+        //     ),
+        //     const SizedBox(width: 8),
+        //     Text('Create Investor Account', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+        //   ],
+        // ),
+        // const SizedBox(height: 24),
         _buildInputField(
-          label: 'Owner Full Name *', // Added asterisk for required
+          label: 'Full Name',
           icon: Icons.person_outline,
-          controller: _signupUsernameController, // This is 'name' for the User model
-          hintText: 'e.g., Budi Santoso',
+          controller: _signupNameController,
+          hintText: 'e.g., Investor Name',
         ),
         const SizedBox(height: 16),
         _buildInputField(
-          label: 'Email *', // Added asterisk for required
+          label: 'Email',
           icon: Icons.email_outlined,
           controller: _signupEmailController,
-          hintText: 'your@email.com',
+          hintText: 'your.investor@email.com',
           keyboardType: TextInputType.emailAddress,
         ),
         const SizedBox(height: 16),
-         _buildInputField(
-          label: 'UMKM Business Name (Optional)',
-          icon: Icons.storefront_outlined,
-          controller: _signupUmkmNameController,
-          hintText: 'e.g., Warung Budi Jaya',
-        ),
-        const SizedBox(height: 16),
-        _buildInputField(
-          label: 'UMKM Contact (Optional - Phone/WA)',
-          icon: Icons.phone_outlined,
-          controller: _signupUmkmContactController,
-          hintText: 'e.g., 081234567890',
-          keyboardType: TextInputType.phone,
-        ),
-        const SizedBox(height: 16),
         _buildPasswordField(
-          label: 'Password *', // Added asterisk for required
+          label: 'Password',
           controller: _signupPasswordController,
           obscureText: _obscureSignupPassword,
           onToggleVisibility: _toggleSignupPasswordVisibility,
-          minLength: 6, // Reflects UMKM password min length
         ),
-        Padding(
+         Padding(
           padding: const EdgeInsets.only(left: 16, top: 4, bottom: 8),
-          child: Text('At least 6 characters.', style: Theme.of(context).textTheme.bodySmall),
+          child: Text('At least 8 characters.', style: Theme.of(context).textTheme.bodySmall),
         ),
         _buildPasswordField(
-          label: 'Confirm Password *', // Added asterisk for required
+          label: 'Confirm Password',
           controller: _signupConfirmPasswordController,
           obscureText: _obscureConfirmPassword,
           onToggleVisibility: _toggleConfirmPasswordVisibility,
-          minLength: 6, // Reflects UMKM password min length
         ),
         const SizedBox(height: 24),
         ElevatedButton(
-          onPressed: _isLoading ? null : _handleUmkmSignup,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Theme.of(context).colorScheme.primary,
+          onPressed: _isLoading ? null : _handleInvestorSignup,
+           style: ElevatedButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.secondary,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 16),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
           child: _isLoading
               ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
-              : const Text('Register UMKM Account'),
+              : const Text('Register Investor Account'),
         ),
+        const SizedBox(height: 16),
+        // TextButton( // Handled by AppBar back button
+        //   onPressed: _toggleLoginSignup,
+        //   child: const Text('Already have an Investor account? Login'),
+        // ),
       ],
     );
   }
 
- Widget _buildLogo() {
-    // Consistent logo for both login and signup if desired, or can be different
+   Widget _buildLogo() {
     return Column(
       children: [
         Container(
-          padding: const EdgeInsets.all(16), // Slightly larger padding
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primaryContainer,
+            color: Theme.of(context).colorScheme.secondaryContainer,
             shape: BoxShape.circle,
           ),
           child: Icon(
-            Icons.store_mall_directory_outlined, // Icon representing UMKM/Store
+            Icons.insights_outlined, // Icon for investors
             size: 48,
-            color: Theme.of(context).colorScheme.onPrimaryContainer,
+            color: Theme.of(context).colorScheme.onSecondaryContainer,
           ),
         ),
         const SizedBox(height: 12),
-        Text(
-          'UMKM Portal', // Generic name
+         Text(
+          'Investor Portal',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
         )
       ],
@@ -407,34 +381,38 @@ class _AuthWrapperState extends State<AuthWrapper> {
     required TextEditingController controller,
     required String hintText,
     TextInputType keyboardType = TextInputType.text,
-    bool enabled = true,
-    // FormFieldValidator<String>? validator, // Optional: Add validator
   }) {
-    return TextFormField(
+     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
-      enabled: enabled,
       decoration: InputDecoration(
         labelText: label,
         hintText: hintText,
-        prefixIcon: Icon(icon, color: Theme.of(context).hintColor),
+        prefixIcon: Icon(icon, color: Colors.grey[600]),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey.shade400),
+          borderSide: BorderSide(color: Colors.grey.shade300),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey.shade400),
+          borderSide: BorderSide(color: Colors.grey.shade300),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 2.0),
+          borderSide: BorderSide(color: Theme.of(context).colorScheme.secondary, width: 1.5),
         ),
-        filled: !enabled, // Only fill if disabled for visual cue
-        fillColor: Colors.grey[200],
-        contentPadding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 12.0),
+        filled: true,
+        fillColor: Colors.grey[50],
       ),
-      // validator: validator, // Use if you pass a validator
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return '$label cannot be empty';
+        }
+         if (label.toLowerCase().contains('email') && !value.contains('@')) {
+          return 'Please enter a valid email';
+        }
+        return null;
+      },
     );
   }
 
@@ -443,8 +421,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
     required TextEditingController controller,
     required bool obscureText,
     required VoidCallback onToggleVisibility,
-    required int minLength,
-    // FormFieldValidator<String>? validator, // Optional: Add validator
   }) {
     return TextFormField(
       controller: controller,
@@ -452,37 +428,38 @@ class _AuthWrapperState extends State<AuthWrapper> {
       decoration: InputDecoration(
         labelText: label,
         hintText: '••••••••',
-        prefixIcon: Icon(Icons.lock_outline, color: Theme.of(context).hintColor),
+        prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[600]),
         suffixIcon: IconButton(
           icon: Icon(
             obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-            color: Theme.of(context).hintColor,
+            color: Colors.grey[600],
           ),
           onPressed: onToggleVisibility,
         ),
-        border: OutlineInputBorder(
+         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey.shade400),
+          borderSide: BorderSide(color: Colors.grey.shade300),
         ),
          enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey.shade400),
+          borderSide: BorderSide(color: Colors.grey.shade300),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 2.0),
+          borderSide: BorderSide(color: Theme.of(context).colorScheme.secondary, width: 1.5),
         ),
-        contentPadding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 12.0),
+        filled: true,
+        fillColor: Colors.grey[50],
       ),
-      // validator: validator ?? (value) { // Default validator if none provided
-      //   if (value == null || value.isEmpty) {
-      //     return '$label cannot be empty';
-      //   }
-      //   if (value.length < minLength) {
-      //     return '$label must be at least $minLength characters';
-      //   }
-      //   return null;
-      // },
+       validator: (value) {
+        if (value == null || value.isEmpty) {
+          return '$label cannot be empty';
+        }
+        if (value.length < 8) {
+          return '$label must be at least 8 characters';
+        }
+        return null;
+      },
     );
   }
 }
