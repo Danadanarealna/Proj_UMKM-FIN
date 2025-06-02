@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 import 'api.dart';
-// import 'app_state.dart'; // Not directly used here, but good for consistency if AppState manages user data
 
 class ProfileScreen extends StatefulWidget {
   final String username;
@@ -11,8 +12,10 @@ class ProfileScreen extends StatefulWidget {
   final String umkmName;
   final String umkmContact;
   final bool isInvestable;
+  final String? umkmDescription;
+  final String? umkmProfileImageUrl;
   final VoidCallback onLogout;
-  final Function(String newUmkmName, String newUmkmContact, String newOwnerName, bool newIsInvestable) onProfileUpdated;
+  final Function(String newUmkmName, String newUmkmContact, String newOwnerName, bool newIsInvestable, String? newDescription, String? newImageUrl) onProfileUpdated;
   final Future<void> Function() onRefresh;
 
   const ProfileScreen({
@@ -21,6 +24,8 @@ class ProfileScreen extends StatefulWidget {
     required this.umkmName,
     required this.umkmContact,
     required this.isInvestable,
+    this.umkmDescription,
+    this.umkmProfileImageUrl,
     required this.onLogout,
     required this.onProfileUpdated,
     required this.onRefresh,
@@ -37,14 +42,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late String _currentUmkmName;
   late String _currentUmkmContact;
   late bool _currentIsInvestable;
+  late String? _currentUmkmDescription;
+  String? _currentUmkmProfileImageUrl;
+
   bool _isEditing = false;
   bool _isLoading = false;
-  bool _isSavingInvestableToggle = false;
+  File? _profileImageFile;
+  final ImagePicker _picker = ImagePicker();
 
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _ownerNameController;
   late TextEditingController _umkmNameController;
   late TextEditingController _umkmContactController;
+  late TextEditingController _umkmDescriptionController;
 
   @override
   void initState() {
@@ -53,6 +63,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _ownerNameController = TextEditingController(text: _currentOwnerName);
     _umkmNameController = TextEditingController(text: _currentUmkmName);
     _umkmContactController = TextEditingController(text: _currentUmkmContact);
+    _umkmDescriptionController = TextEditingController(text: _currentUmkmDescription ?? '');
   }
 
   @override
@@ -62,11 +73,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         widget.email != oldWidget.email ||
         widget.umkmName != oldWidget.umkmName ||
         widget.umkmContact != oldWidget.umkmContact ||
-        widget.isInvestable != oldWidget.isInvestable) {
+        widget.isInvestable != oldWidget.isInvestable ||
+        widget.umkmDescription != oldWidget.umkmDescription ||
+        widget.umkmProfileImageUrl != oldWidget.umkmProfileImageUrl) {
       _updateLocalStateFromWidget();
       _ownerNameController.text = _currentOwnerName;
       _umkmNameController.text = _currentUmkmName;
       _umkmContactController.text = _currentUmkmContact;
+      _umkmDescriptionController.text = _currentUmkmDescription ?? '';
     }
   }
 
@@ -76,6 +90,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _currentUmkmName = widget.umkmName;
     _currentUmkmContact = widget.umkmContact;
     _currentIsInvestable = widget.isInvestable;
+    _currentUmkmDescription = widget.umkmDescription;
+    _currentUmkmProfileImageUrl = widget.umkmProfileImageUrl;
   }
 
   @override
@@ -83,98 +99,91 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _ownerNameController.dispose();
     _umkmNameController.dispose();
     _umkmContactController.dispose();
+    _umkmDescriptionController.dispose();
     super.dispose();
   }
 
-  Future<void> _updateProfileData({bool? newIsInvestable}) async {
-    // If only toggling investable status, no need to validate the form
+  Future<void> _pickImage() async {
+    final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      setState(() {
+        _profileImageFile = File(pickedFile.path);
+      });
+    }
+  }
+
+  Future<void> _updateProfileData() async {
     if (_isEditing && !_formKey.currentState!.validate()) {
       return;
     }
     
-    if (newIsInvestable != null) { // If called from Switch toggle
-        setState(() => _isSavingInvestableToggle = true);
-    } else { // If called from Save Changes button
-        setState(() => _isLoading = true);
-    }
-
+    setState(() => _isLoading = true);
 
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('token');
     if (token == null) {
-      _showError("Authentication token not found. Please login again.");
-      if (newIsInvestable != null) setState(() => _isSavingInvestableToggle = false);
-      else setState(() => _isLoading = false);
+      if(mounted){
+        _showError("Authentication token not found. Please login again.");
+      }
+      setState(() => _isLoading = false);
       widget.onLogout();
       return;
     }
 
-    Map<String, dynamic> body = {
-      'name': _ownerNameController.text,
-      'umkm_name': _umkmNameController.text,
-      'contact': _umkmContactController.text, // Use 'contact' key
-      'is_investable': newIsInvestable ?? _currentIsInvestable, // Use toggled value or current form value
-    };
+    var request = http.MultipartRequest('POST', Uri.parse('$apiBaseUrl/profile'));
+    request.headers['Authorization'] = 'Bearer $token';
+    request.headers['Accept'] = 'application/json';
+    
+    request.fields['name'] = _ownerNameController.text;
+    request.fields['umkm_name'] = _umkmNameController.text;
+    request.fields['contact'] = _umkmContactController.text;
+    request.fields['umkm_description'] = _umkmDescriptionController.text;
+    request.fields['is_investable'] = _currentIsInvestable.toString();
+
+    if (_profileImageFile != null) {
+      request.files.add(await http.MultipartFile.fromPath('umkm_profile_image', _profileImageFile!.path));
+    }
 
     try {
-      final response = await http.put(
-        Uri.parse('$apiBaseUrl/profile'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: jsonEncode(body),
-      );
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
 
       if (mounted) {
-        if (newIsInvestable != null) setState(() => _isSavingInvestableToggle = false);
-        else setState(() => _isLoading = false);
+        setState(() => _isLoading = false);
 
         if (response.statusCode == 200) {
           final responseData = jsonDecode(response.body);
           final updatedUser = responseData['user'];
           
-          // Update local state and call parent callback
           _currentOwnerName = updatedUser['name'] ?? _ownerNameController.text;
           _currentUmkmName = updatedUser['umkm_name'] ?? _umkmNameController.text;
           _currentUmkmContact = updatedUser['contact'] ?? _umkmContactController.text;
-          _currentIsInvestable = updatedUser['is_investable'] as bool? ?? (newIsInvestable ?? _currentIsInvestable);
-
+          _currentIsInvestable = updatedUser['is_investable'] as bool? ?? _currentIsInvestable;
+          _currentUmkmDescription = updatedUser['umkm_description'] ?? _umkmDescriptionController.text;
+          _currentUmkmProfileImageUrl = updatedUser['umkm_profile_image_url'];
 
           widget.onProfileUpdated(
             _currentUmkmName,
             _currentUmkmContact,
             _currentOwnerName,
             _currentIsInvestable,
+            _currentUmkmDescription,
+            _currentUmkmProfileImageUrl
           );
           
-          if (! (newIsInvestable != null)) { // Only exit editing mode if it was a full save
-            setState(() { _isEditing = false; });
-          }
+          setState(() { _isEditing = false; _profileImageFile = null; });
 
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Profile updated successfully!'), backgroundColor: Colors.green),
           );
         } else {
           final errorData = jsonDecode(response.body);
-          _showError(errorData['message'] ?? 'Failed to update profile. Status: ${response.statusCode}');
-          // Revert UI toggle if only investable status update failed
-          if (newIsInvestable != null) {
-            setState(() { _currentIsInvestable = !newIsInvestable; });
-          }
+          _showError(errorData['message'] ?? 'Failed to update profile. Status: ${response.statusCode} ${response.body}');
         }
       }
     } catch (e) {
       if (mounted) {
-        if (newIsInvestable != null) {
-            setState(() {
-                _isSavingInvestableToggle = false;
-                _currentIsInvestable = !newIsInvestable; // Revert on error
-            });
-        } else {
-             setState(() => _isLoading = false);
-        }
+        setState(() => _isLoading = false);
         _showError('Error updating profile: ${e.toString()}');
       }
     }
@@ -194,30 +203,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         title: Text(_isEditing ? 'Edit UMKM Profile' : 'UMKM Profile'),
         actions: [
-          if (!_isEditing)
-            IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Edit Profile',
-              onPressed: () {
-                setState(() {
-                  _isEditing = true;
-                  _ownerNameController.text = _currentOwnerName;
-                  _umkmNameController.text = _currentUmkmName;
-                  _umkmContactController.text = _currentUmkmContact;
-                });
-              },
-            )
-          else
+          if (_isEditing)
             IconButton(
               icon: const Icon(Icons.cancel_outlined),
               tooltip: 'Cancel Edit',
               onPressed: () {
                 setState(() {
                   _isEditing = false;
+                  _profileImageFile = null;
                   _ownerNameController.text = widget.username;
                   _umkmNameController.text = widget.umkmName;
                   _umkmContactController.text = widget.umkmContact;
-                  // _currentIsInvestable is not reset here to reflect its actual state from widget.isInvestable
+                  _umkmDescriptionController.text = widget.umkmDescription ?? '';
                   _currentIsInvestable = widget.isInvestable; 
                 });
               },
@@ -226,6 +223,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       body: RefreshIndicator(
         onRefresh: () async {
+          if (_isEditing) return; 
           await widget.onRefresh();
           _updateLocalStateFromWidget();
         },
@@ -244,7 +242,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   label: _isLoading
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
                       : const Text('Save Changes'),
-                  onPressed: _isLoading ? null : () => _updateProfileData(),
+                  onPressed: _isLoading ? null : _updateProfileData,
                   style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, foregroundColor: Colors.white),
                 )
               else
@@ -253,7 +251,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   label: const Text('Logout'),
                   onPressed: widget.onLogout,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.redAccent.withOpacity(0.1),
+                    backgroundColor: Colors.redAccent.withAlpha(26),
                     foregroundColor: Colors.redAccent,
                     elevation: 0,
                   ),
@@ -267,20 +265,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileHeader(ThemeData theme) {
+    Widget profilePicture;
+    if (_profileImageFile != null) {
+      profilePicture = CircleAvatar(radius: 50, backgroundImage: FileImage(_profileImageFile!));
+    } else if (_currentUmkmProfileImageUrl != null && _currentUmkmProfileImageUrl!.isNotEmpty) {
+      profilePicture = CircleAvatar(radius: 50, backgroundImage: NetworkImage(_currentUmkmProfileImageUrl!));
+    } else {
+      profilePicture = CircleAvatar(
+        radius: 50,
+        backgroundColor: theme.colorScheme.primary.withAlpha(204),
+        child: Text(
+          _currentOwnerName.isNotEmpty ? _currentOwnerName[0].toUpperCase() : "U",
+          style: const TextStyle(fontSize: 40, color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+      );
+    }
+
     return Card(
       elevation: 0,
-      color: theme.colorScheme.primary.withOpacity(0.05),
+      color: theme.colorScheme.primary.withAlpha(13),
       child: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(children: [
-          CircleAvatar(
-            radius: 50,
-            backgroundColor: theme.colorScheme.primary.withOpacity(0.8),
-            child: Text(
-              _currentOwnerName.isNotEmpty ? _currentOwnerName[0].toUpperCase() : "U",
-              style: const TextStyle(fontSize: 40, color: Colors.white, fontWeight: FontWeight.bold),
+          profilePicture,
+          if (_isEditing)
+            TextButton.icon(
+              icon: Icon(Icons.camera_alt_outlined, size: 18, color: theme.colorScheme.primary),
+              label: Text('Change Image', style: TextStyle(color: theme.colorScheme.primary)),
+              onPressed: _pickImage,
             ),
-          ),
           const SizedBox(height: 16),
           Text(_currentOwnerName, style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold), textAlign: TextAlign.center),
           const SizedBox(height: 4),
@@ -297,25 +310,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
           title: "UMKM Details",
           icon: Icons.storefront_outlined,
           theme: theme,
+          actions: !_isEditing
+              ? [
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined),
+                    tooltip: 'Edit Profile',
+                    onPressed: () {
+                      setState(() {
+                        _isEditing = true;
+                        _ownerNameController.text = _currentOwnerName;
+                        _umkmNameController.text = _currentUmkmName;
+                        _umkmContactController.text = _currentUmkmContact;
+                        _umkmDescriptionController.text = _currentUmkmDescription ?? '';
+                        _profileImageFile = null;
+                      });
+                    },
+                  )
+                ]
+              : [],
           children: [
             _buildDisplayRow(label: "UMKM Name:", value: _currentUmkmName.isNotEmpty ? _currentUmkmName : "Not set"),
             _buildDisplayRow(label: "Contact:", value: _currentUmkmContact.isNotEmpty ? _currentUmkmContact : "Not set", isPhone: true),
+            _buildDisplayRow(label: "Description:", value: _currentUmkmDescription?.isNotEmpty == true ? _currentUmkmDescription! : "Not set"),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text("Open for Investment:", style: TextStyle(color: Colors.grey[600], fontWeight: FontWeight.w500, fontSize: 15)),
-                  _isSavingInvestableToggle 
-                    ? SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2.5, color: theme.colorScheme.primary))
-                    : Switch(
-                        value: _currentIsInvestable,
-                        onChanged: (bool value) {
-                          setState(() { _currentIsInvestable = value; });
-                          _updateProfileData(newIsInvestable: value);
-                        },
-                        activeColor: theme.colorScheme.primary,
-                      ),
+                  Switch(
+                    value: _currentIsInvestable,
+                    onChanged: null, // Made non-interactive in display mode
+                    activeColor: theme.colorScheme.primary,
+                    inactiveThumbColor: Colors.grey.shade400,
+                    inactiveTrackColor: Colors.grey.shade200,
+                  ),
                 ],
               ),
             ),
@@ -336,7 +365,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextFormField(
             controller: _ownerNameController,
             decoration: const InputDecoration(labelText: "Owner Full Name", prefixIcon: Icon(Icons.person_outline)),
-            validator: (value) => value == null || value.isEmpty ? "Owner name cannot be empty" : null,
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return "Owner name cannot be empty";
+              }
+              return null;
+            }
           ),
           const SizedBox(height: 24),
           Text("Edit UMKM Business Information", style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
@@ -344,14 +378,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
           TextFormField(
             controller: _umkmNameController,
             decoration: const InputDecoration(labelText: "UMKM Business Name", prefixIcon: Icon(Icons.storefront_outlined)),
-            // validator: (value) => value == null || value.isEmpty ? "UMKM name cannot be empty" : null, // Optional based on your rules
           ),
           const SizedBox(height: 16),
           TextFormField(
             controller: _umkmContactController,
             decoration: const InputDecoration(labelText: "Contact (Phone/WA)", prefixIcon: Icon(Icons.contact_phone_outlined)),
             keyboardType: TextInputType.phone,
-            // validator: (value) => value == null || value.isEmpty ? "UMKM contact cannot be empty" : null, // Optional
+          ),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: _umkmDescriptionController,
+            decoration: const InputDecoration(labelText: "UMKM Description", prefixIcon: Icon(Icons.description_outlined), alignLabelWithHint: true),
+            maxLines: 3,
+            minLines: 1,
           ),
           const SizedBox(height: 24),
            SwitchListTile(
@@ -371,18 +410,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildInfoCard({required String title, required IconData icon, required List<Widget> children, required ThemeData theme}) {
+  Widget _buildInfoCard({
+    required String title,
+    required IconData icon,
+    required List<Widget> children,
+    required ThemeData theme,
+    List<Widget> actions = const [],
+  }) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              Icon(icon, color: theme.colorScheme.primary, size: 22),
-              const SizedBox(width: 10),
-              Text(title, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-            ]),
+            Row(
+              children: [
+                Icon(icon, color: theme.colorScheme.primary, size: 22),
+                const SizedBox(width: 10),
+                Expanded(child: Text(title, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600))),
+                ...actions,
+              ],
+            ),
             const Divider(height: 20),
             ...children,
           ],

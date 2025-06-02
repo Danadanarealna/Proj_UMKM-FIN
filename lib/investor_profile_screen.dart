@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'api.dart'; // Assuming api.dart defines apiBaseUrl
+import 'api.dart'; 
 import 'package:intl/intl.dart';
-import 'app_state.dart'; // Assuming app_state.dart defines AppState and AuthWrapper
-import 'auth.dart'; // Assuming auth.dart might be needed by AuthWrapper or other parts
-import 'package:url_launcher/url_launcher.dart'; // Import for launching URLs
+import 'app_state.dart'; 
+import 'auth.dart';
+import 'package:url_launcher/url_launcher.dart'; 
 
 class InvestmentInfo {
   final String id;

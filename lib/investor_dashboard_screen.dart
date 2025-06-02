@@ -4,10 +4,10 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'api.dart';
-import 'auth.dart'; // For AuthWrapper on logout
+import 'auth.dart'; 
 import 'app_state.dart';
-import 'umkm_list_screen.dart'; // Screen to show list of UMKMs
-import 'investor_profile_screen.dart'; // Screen for investor's own profile
+import 'umkm_list_screen.dart'; 
+import 'investor_profile_screen.dart'; 
 
 class InvestorDashboardScreen extends StatefulWidget {
   const InvestorDashboardScreen({super.key});

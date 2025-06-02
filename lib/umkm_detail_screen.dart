@@ -3,10 +3,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
-import 'main.dart'; // For Transaction model and launchWhatsApp helper
+import 'main.dart';
 
 class UmkmDetail {
   final int id;
@@ -14,6 +13,8 @@ class UmkmDetail {
   final String email;
   final String umkmName;
   final String umkmContact;
+  final String? umkmDescription;
+  final String? umkmProfileImageUrl;
 
   UmkmDetail({
     required this.id,
@@ -21,6 +22,8 @@ class UmkmDetail {
     required this.email,
     required this.umkmName,
     required this.umkmContact,
+    this.umkmDescription,
+    this.umkmProfileImageUrl,
   });
 
   factory UmkmDetail.fromJson(Map<String, dynamic> json) {
@@ -29,7 +32,9 @@ class UmkmDetail {
       ownerName: json['name']?.toString() ?? 'N/A',
       email: json['email']?.toString() ?? 'N/A',
       umkmName: json['umkm_name']?.toString() ?? 'Unnamed UMKM',
-      umkmContact: json['umkm_contact']?.toString() ?? 'No Contact',
+      umkmContact: json['contact']?.toString() ?? 'No Contact',
+      umkmDescription: json['umkm_description'] as String?,
+      umkmProfileImageUrl: json['umkm_profile_image_url'] as String?,
     );
   }
 }
@@ -56,7 +61,7 @@ class FinancialSummary {
 
 class UmkmDetailScreen extends StatefulWidget {
   final int umkmId;
-  final String umkmName; // Passed for AppBar title initially
+  final String umkmName;
 
   const UmkmDetailScreen({
     super.key,
@@ -71,14 +76,13 @@ class UmkmDetailScreen extends StatefulWidget {
 class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
   UmkmDetail? _umkmDetail;
   FinancialSummary? _financialSummary;
-  List<Transaction> _transactions = []; // 'Done' transactions for summary
+  List<Transaction> _transactions = [];
   bool _isLoading = true;
   String? _errorMessage;
-  String? _investorName; // To prefill WhatsApp message
+  String? _investorName;
 
   final TextEditingController _investmentAmountController = TextEditingController();
   final TextEditingController _appointmentDetailsController = TextEditingController();
-
 
   @override
   void initState() {
@@ -100,7 +104,6 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
     }
   }
 
-
   Future<void> _fetchUmkmDetails() async {
     setState(() {
       _isLoading = true;
@@ -115,7 +118,6 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
         _isLoading = false;
         _errorMessage = "Authentication required.";
       });
-      // Potentially navigate to login
       return;
     }
 
@@ -176,7 +178,7 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
             ElevatedButton(
               child: const Text('Submit Investment'),
               onPressed: () {
-                Navigator.of(context).pop(); // Close dialog first
+                Navigator.of(context).pop();
                 _submitInvestment();
               },
             ),
@@ -198,7 +200,7 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
       return;
     }
 
-    setState(() => _isLoading = true); // Show loading indicator on screen potentially
+    setState(() => _isLoading = true);
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('token');
 
@@ -216,18 +218,20 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
         }),
       );
 
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
       if (response.statusCode == 201) {
-        final responseData = jsonDecode(response.body);
         _showSnackbar('Investment of \$${amount.toStringAsFixed(2)} initiated successfully!', isError: false);
-        // Optionally, refresh data or update UI based on responseData['investment']
-        _fetchUmkmDetails(); // Refresh to see if summary changes (though investment is 'pending')
+        _fetchUmkmDetails();
       } else {
         final errorData = jsonDecode(response.body);
         _showSnackbar(errorData['message'] ?? 'Investment failed. Status: ${response.statusCode}', isError: true);
       }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
       _showSnackbar('Error submitting investment: ${e.toString()}', isError: true);
     }
   }
@@ -235,32 +239,30 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
   void _showAppointmentDialog() {
     _appointmentDetailsController.text = "Halo ${_umkmDetail?.ownerName ?? _umkmDetail?.umkmName ?? 'UMKM'}, saya ${_investorName ?? 'seorang investor'} tertarik untuk membahas lebih lanjut mengenai UMKM Anda.";
     if (_investmentAmountController.text.isNotEmpty) {
-         _appointmentDetailsController.text += " Saya baru saja mengajukan investasi sebesar \$${_investmentAmountController.text}.";
+      _appointmentDetailsController.text += " Saya baru saja mengajukan investasi sebesar \$${_investmentAmountController.text}.";
     }
-
 
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
           title: Text('Request Appointment with ${_umkmDetail?.umkmName ?? widget.umkmName}'),
-          content: SingleChildScrollView( // In case content is long
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                 Text("A WhatsApp message will be prepared for you to send to ${_umkmDetail?.umkmContact ?? 'the UMKM'}. You can edit the message below before proceeding."),
-                 const SizedBox(height: 16),
-                 TextField(
-                  controller: _appointmentDetailsController,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'Message for UMKM (via WhatsApp)',
-                    border: OutlineInputBorder(),
-                  ),
+          content: SingleChildScrollView(
+              child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("A WhatsApp message will be prepared for you to send to ${_umkmDetail?.umkmContact ?? 'the UMKM'}. You can edit the message below before proceeding."),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _appointmentDetailsController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Message for UMKM (via WhatsApp)',
+                  border: OutlineInputBorder(),
                 ),
-              ],
-            )
-          ),
+              ),
+            ],
+          )),
           actions: <Widget>[
             TextButton(
               child: const Text('Cancel'),
@@ -292,14 +294,6 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
     setState(() => _isLoading = true);
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('token');
-    final investmentAmount = _investmentAmountController.text.isNotEmpty
-        ? double.tryParse(_investmentAmountController.text)
-        : null;
-
-    // Find the latest pending/active investment for this UMKM by this investor, if any
-    // This is a simplified approach. A more robust way would be to pass the specific investment ID
-    // if the appointment is directly related to a very recent investment.
-    // For now, we'll assume the appointment is general or related to the amount in the text field.
 
     try {
       final response = await http.post(
@@ -311,28 +305,20 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
         },
         body: jsonEncode({
           'umkm_id': widget.umkmId,
-          // 'investment_id': null, // Link to a specific investment if applicable
           'appointment_details': "Investor: ${_investorName ?? 'N/A'}. UMKM: ${_umkmDetail?.umkmName}. Message: ${_appointmentDetailsController.text}",
           'contact_method': 'whatsapp',
-          'contact_payload': _appointmentDetailsController.text, // This is the message for WhatsApp
+          'contact_payload': _appointmentDetailsController.text,
         }),
       );
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
 
       if (response.statusCode == 201) {
         _showSnackbar('Appointment request logged. Opening WhatsApp...', isError: false);
-        // Launch WhatsApp
-        // Sanitize phone number: remove non-digits, ensure country code if needed
-        String umkmPhone = _umkmDetail!.umkmContact.replaceAll(RegExp(r'[^0-9+]'), '');
-        if (umkmPhone.startsWith('0')) {
-            umkmPhone = '62${umkmPhone.substring(1)}'; // Assuming Indonesian numbers, replace 0 with +62
-        } else if (!umkmPhone.startsWith('+') && !umkmPhone.startsWith('62')) {
-            umkmPhone = '62$umkmPhone'; // Add default country code if missing
-        }
-
 
         await launchWhatsApp(
-          phone: umkmPhone,
+          phone: _umkmDetail!.umkmContact,
           message: _appointmentDetailsController.text,
         );
       } else {
@@ -340,11 +326,12 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
         _showSnackbar(errorData['message'] ?? 'Failed to log appointment. Status: ${response.statusCode}', isError: true);
       }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
       _showSnackbar('Error requesting appointment: ${e.toString()}', isError: true);
     }
   }
-
 
   void _showSnackbar(String message, {bool isError = false}) {
     if (!mounted) return;
@@ -369,7 +356,7 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
   }
 
   Widget _buildBody(ThemeData theme) {
-    if (_isLoading && _umkmDetail == null) { // Initial loading
+    if (_isLoading && _umkmDetail == null) {
       return Center(child: CircularProgressIndicator(color: theme.colorScheme.secondary));
     }
     if (_errorMessage != null) {
@@ -379,7 +366,7 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.error_outline, color: Colors.redAccent, size: 50),
+              const Icon(Icons.error_outline, color: Colors.redAccent, size: 50),
               const SizedBox(height: 16),
               Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, color: Colors.redAccent)),
               const SizedBox(height: 20),
@@ -401,7 +388,7 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
     return RefreshIndicator(
       onRefresh: _fetchUmkmDetails,
       color: theme.colorScheme.secondary,
-      child: ListView( // Changed to ListView for simplicity, can be CustomScrollView if complex layouts needed
+      child: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
           _buildUmkmInfoCard(theme),
@@ -409,11 +396,11 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
           _buildFinancialSummaryCard(theme),
           const SizedBox(height: 20),
           _buildTransactionsSection(theme),
-          if (_isLoading) // Loading indicator for subsequent actions like invest/appoint
-             Padding(
-               padding: const EdgeInsets.symmetric(vertical: 20.0),
-               child: Center(child: CircularProgressIndicator(color: theme.colorScheme.secondary)),
-             ),
+          if (_isLoading)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20.0),
+              child: Center(child: CircularProgressIndicator(color: theme.colorScheme.secondary)),
+            ),
         ],
       ),
     );
@@ -426,8 +413,44 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_umkmDetail!.umkmName, style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.secondary)),
+            if (_umkmDetail!.umkmProfileImageUrl != null && _umkmDetail!.umkmProfileImageUrl!.isNotEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8.0),
+                    child: Image.network(
+                      _umkmDetail!.umkmProfileImageUrl!,
+                      height: 150,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Icon(Icons.business_center, size: 100, color: Colors.grey[300]),
+                    ),
+                  ),
+                ),
+              )
+            else
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: CircleAvatar(
+                    radius: 50,
+                    backgroundColor: theme.colorScheme.secondary.withAlpha(50),
+                    child: Icon(Icons.storefront, size: 50, color: theme.colorScheme.secondary),
+                  ),
+                ),
+              ),
+            Center( // Centering the UMKM Name
+              child: Text(
+                _umkmDetail!.umkmName,
+                style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.colorScheme.secondary),
+              ),
+            ),
             const SizedBox(height: 8),
+            if (_umkmDetail!.umkmDescription != null && _umkmDetail!.umkmDescription!.isNotEmpty) ...[
+              _buildDetailItem(icon: Icons.description_outlined, label: "About", value: _umkmDetail!.umkmDescription!, theme: theme),
+              const Divider(height: 16),
+            ],
             _buildDetailItem(icon: Icons.person_outline, label: "Owner", value: _umkmDetail!.ownerName, theme: theme),
             _buildDetailItem(icon: Icons.email_outlined, label: "Email", value: _umkmDetail!.email, theme: theme),
             _buildDetailItem(icon: Icons.phone_outlined, label: "Contact", value: _umkmDetail!.umkmContact, theme: theme, isContact: true),
@@ -437,20 +460,25 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
     );
   }
 
-   Widget _buildDetailItem({required IconData icon, required String label, required String value, required ThemeData theme, bool isContact = false}) {
+  Widget _buildDetailItem({required IconData icon, required String label, required String value, required ThemeData theme, bool isContact = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: theme.colorScheme.secondary.withOpacity(0.8)),
+          Icon(icon, size: 20, color: theme.colorScheme.secondary.withAlpha(204)),
           const SizedBox(width: 12),
           Text("$label: ", style: TextStyle(fontWeight: FontWeight.w500, color: Colors.grey[700])),
-          Expanded(child: Text(value, style: TextStyle(color: isContact ? theme.primaryColor : Colors.grey[800]), textAlign: TextAlign.end,)),
+          Expanded(
+              child: Text(
+            value,
+            style: TextStyle(color: isContact ? theme.primaryColor : Colors.grey[800]),
+            textAlign: TextAlign.end,
+          )),
         ],
       ),
     );
   }
-
 
   Widget _buildFinancialSummaryCard(ThemeData theme) {
     if (_financialSummary == null) return const SizedBox.shrink();
@@ -471,17 +499,15 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
             ),
             const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal:12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: _financialSummary!.netProfit >= 0
-                    ? Colors.green.withOpacity(0.1)
-                    : Colors.red.withOpacity(0.1),
+                color: _financialSummary!.netProfit >= 0 ? Colors.green.withAlpha(26) : Colors.red.withAlpha(26),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                   Text(
+                  Text(
                     'Net Profit:',
                     style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                   ),
@@ -489,9 +515,7 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
                     '\$${_financialSummary!.netProfit.toStringAsFixed(2)}',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: _financialSummary!.netProfit >= 0
-                          ? Colors.green[800]
-                          : Colors.red[800],
+                      color: _financialSummary!.netProfit >= 0 ? Colors.green[800] : Colors.red[800],
                     ),
                   ),
                 ],
@@ -532,22 +556,21 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
         ),
         ListView.builder(
           shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(), // ListView inside another scroll view
-          itemCount: _transactions.length > 5 ? 5 : _transactions.length, // Show max 5 or less
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _transactions.length > 5 ? 5 : _transactions.length,
           itemBuilder: (context, index) {
             final transaction = _transactions[index];
             return Card(
               margin: const EdgeInsets.symmetric(vertical: 4.0),
               child: ListTile(
-                 leading: CircleAvatar(
-                    backgroundColor: transaction.isIncome ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
-                    child: Icon(transaction.isIncome ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded, color: transaction.isIncome ? Colors.green.shade600 : Colors.red.shade600, size: 20),
-                  ),
+                leading: CircleAvatar(
+                    backgroundColor: transaction.isIncome ? Colors.green.withAlpha(26) : Colors.red.withAlpha(26),
+                    child: Icon(transaction.isIncome ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded, color: transaction.isIncome ? Colors.green.shade600 : Colors.red.shade600, size: 20)),
                 title: Text(
-                  'ID: ${transaction.id.length > 15 ? '${transaction.id.substring(0,8)}...' : transaction.id}', // Display part of UUID
+                  'ID: ${transaction.userSequenceId ?? transaction.id.substring(0, 8)}',
                   style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Colors.grey),
                 ),
-                subtitle: Text(DateFormat('dd MMM, yyyy').format(transaction.date)),
+                subtitle: Text(DateFormat('dd MMM, yy').format(transaction.date)),
                 trailing: Text(
                   '${transaction.isIncome ? '+' : '-'}\$${transaction.amount.abs().toStringAsFixed(2)}',
                   style: TextStyle(fontWeight: FontWeight.bold, color: transaction.isIncome ? Colors.green.shade700 : Colors.red.shade700, fontSize: 15),
@@ -556,13 +579,12 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
             );
           },
         ),
-         if (_transactions.length > 5)
+        if (_transactions.length > 5)
           Padding(
             padding: const EdgeInsets.only(top: 8.0),
             child: TextButton(
               onPressed: () {
-                // TODO: Navigate to a screen showing all transactions for this UMKM
-                 _showSnackbar("Full transaction list view not yet implemented.", isError: true);
+                _showSnackbar("Full transaction list view not yet implemented.", isError: true);
               },
               child: Text("View All ${_transactions.length} Transactions...", style: TextStyle(color: theme.colorScheme.secondary)),
             ),
@@ -574,12 +596,7 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
   Widget _buildActionButtons(ThemeData theme) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(color: Colors.grey.withOpacity(0.2), spreadRadius: 0, blurRadius: 5)
-        ]
-      ),
+      decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.grey.withAlpha(51), spreadRadius: 0, blurRadius: 5)]),
       child: Row(
         children: [
           Expanded(
@@ -604,4 +621,3 @@ class _UmkmDetailScreenState extends State<UmkmDetailScreen> {
     );
   }
 }
-

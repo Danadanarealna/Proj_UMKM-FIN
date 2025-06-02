@@ -3,8 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'api.dart';
-import 'investor_dashboard_screen.dart'; // To navigate after investor login
-import 'app_state.dart'; // For managing user type
+import 'investor_dashboard_screen.dart'; 
+import 'app_state.dart'; 
 
 
 class InvestorAuthScreen extends StatefulWidget {

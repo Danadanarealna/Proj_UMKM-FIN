@@ -3,9 +3,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'api.dart';
-import 'main.dart'; // For UMKM DashboardScreen
-import 'investor_auth_screen.dart'; // New screen for investor login
-import 'app_state.dart'; // For managing user type - ensure this file exists and is set up
+import 'main.dart';
+import 'investor_auth_screen.dart';
+import 'app_state.dart';
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
@@ -21,11 +21,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
   final TextEditingController _loginEmailController = TextEditingController();
   final TextEditingController _loginPasswordController = TextEditingController();
   final TextEditingController _signupEmailController = TextEditingController();
-  final TextEditingController _signupUsernameController = TextEditingController(); // UMKM Owner Name / User's Name
+  final TextEditingController _signupUsernameController = TextEditingController();
   final TextEditingController _signupPasswordController = TextEditingController();
   final TextEditingController _signupConfirmPasswordController = TextEditingController();
-  final TextEditingController _signupUmkmNameController = TextEditingController(); // UMKM Business Name
-  final TextEditingController _signupUmkmContactController = TextEditingController(); // UMKM Contact
+  final TextEditingController _signupUmkmNameController = TextEditingController();
+  final TextEditingController _signupUmkmContactController = TextEditingController();
 
 
   bool _obscureLoginPassword = true;
@@ -81,7 +81,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
     try {
       final response = await http.post(
-        Uri.parse('$apiBaseUrl/login'), // CORRECTED ENDPOINT for UMKM login
+        Uri.parse('$apiBaseUrl/login'),
         body: jsonEncode({'email': email, 'password': password}),
         headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
       );
@@ -91,12 +91,15 @@ class _AuthWrapperState extends State<AuthWrapper> {
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
           final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('token', data['token']); // Assuming token key is 'token' from Laravel
+          await prefs.setString('token', data['access_token']);
           await prefs.setString('user_type', 'umkm');
           await prefs.setString('user_data', jsonEncode(data['user']));
 
 
           AppState().setUserType('umkm');
+          AppState().setToken(data['access_token']);
+          AppState().setUserData(data['user']);
+
 
           if (mounted) {
             Navigator.pushReplacement(
@@ -119,10 +122,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   Future<void> _handleUmkmSignup() async {
     final email = _signupEmailController.text.trim();
-    final name = _signupUsernameController.text.trim(); // User's full name
+    final name = _signupUsernameController.text.trim();
     final password = _signupPasswordController.text.trim();
     final confirmPassword = _signupConfirmPasswordController.text.trim();
-    final umkmBusinessName = _signupUmkmNameController.text.trim(); // Specific UMKM business name
+    final umkmBusinessName = _signupUmkmNameController.text.trim();
     final umkmContact = _signupUmkmContactController.text.trim();
 
 
@@ -131,10 +134,9 @@ class _AuthWrapperState extends State<AuthWrapper> {
       return;
     }
     if (password != confirmPassword) {
-      _showAlert('Passwords do not match.'); // Client-side check
+      _showAlert('Passwords do not match.');
       return;
     }
-    // Assuming your Laravel validation uses min:6 for UMKM password as per AuthController
     if (password.length < 6) {
       _showAlert('Password must be at least 6 characters.');
       return;
@@ -143,14 +145,14 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
     try {
       final response = await http.post(
-        Uri.parse('$apiBaseUrl/register'), // CORRECTED ENDPOINT for UMKM registration
+        Uri.parse('$apiBaseUrl/register'),
         body: jsonEncode({
-          'name': name, // This is the user's name
+          'name': name,
           'email': email,
           'password': password,
-          'password_confirmation': confirmPassword, // <<< FIXED: Added password_confirmation
-          'umkm_name': umkmBusinessName.isNotEmpty ? umkmBusinessName : null, // Send if not empty
-          'contact': umkmContact.isNotEmpty ? umkmContact : null, // Send if not empty
+          'password_confirmation': confirmPassword,
+          'umkm_name': umkmBusinessName.isNotEmpty ? umkmBusinessName : null,
+          'contact': umkmContact.isNotEmpty ? umkmContact : null,
         }),
         headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
       );
@@ -166,9 +168,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
            if (errorData['errors'] != null && errorData['errors'] is Map) {
                 Map<String, dynamic> errors = errorData['errors'];
                 if (errors.isNotEmpty) {
-                    // Display the first error message encountered
-                    // Laravel validation errors are field-specific, e.g., errors['email'][0]
-                    // This takes the first message from the first field that has an error.
                     errorMessage = errors.entries.first.value[0];
                 }
             } else if (errorData['message'] != null) {
@@ -210,7 +209,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400), // Good for web/tablet view
+              constraints: const BoxConstraints(maxWidth: 400),
               child: AnimatedCrossFade(
                 duration: const Duration(milliseconds: 300),
                 crossFadeState: _showLogin ? CrossFadeState.showFirst : CrossFadeState.showSecond,
@@ -232,7 +231,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         _buildLogo(),
         const SizedBox(height: 24),
         Text(
-          'UMKM Login', // Simplified title
+          'UMKM Login',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
         ),
@@ -250,7 +249,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
           controller: _loginPasswordController,
           obscureText: _obscureLoginPassword,
           onToggleVisibility: _toggleLoginPasswordVisibility,
-          minLength: 6, // Reflects UMKM password min length
+          minLength: 6,
         ),
         const SizedBox(height: 24),
         ElevatedButton(
@@ -286,7 +285,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
             );
           },
           child: Text(
-            'Login / Register as Investor', // Clearer text
+            'Login / Register as Investor',
             textAlign: TextAlign.center,
             style: TextStyle(color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.bold),
           ),
@@ -312,14 +311,14 @@ class _AuthWrapperState extends State<AuthWrapper> {
         ),
         const SizedBox(height: 24),
         _buildInputField(
-          label: 'Owner Full Name *', // Added asterisk for required
+          label: 'Owner Full Name *',
           icon: Icons.person_outline,
-          controller: _signupUsernameController, // This is 'name' for the User model
+          controller: _signupUsernameController,
           hintText: 'e.g., Budi Santoso',
         ),
         const SizedBox(height: 16),
         _buildInputField(
-          label: 'Email *', // Added asterisk for required
+          label: 'Email *',
           icon: Icons.email_outlined,
           controller: _signupEmailController,
           hintText: 'your@email.com',
@@ -342,22 +341,22 @@ class _AuthWrapperState extends State<AuthWrapper> {
         ),
         const SizedBox(height: 16),
         _buildPasswordField(
-          label: 'Password *', // Added asterisk for required
+          label: 'Password *',
           controller: _signupPasswordController,
           obscureText: _obscureSignupPassword,
           onToggleVisibility: _toggleSignupPasswordVisibility,
-          minLength: 6, // Reflects UMKM password min length
+          minLength: 6,
         ),
         Padding(
           padding: const EdgeInsets.only(left: 16, top: 4, bottom: 8),
           child: Text('At least 6 characters.', style: Theme.of(context).textTheme.bodySmall),
         ),
         _buildPasswordField(
-          label: 'Confirm Password *', // Added asterisk for required
+          label: 'Confirm Password *',
           controller: _signupConfirmPasswordController,
           obscureText: _obscureConfirmPassword,
           onToggleVisibility: _toggleConfirmPasswordVisibility,
-          minLength: 6, // Reflects UMKM password min length
+          minLength: 6,
         ),
         const SizedBox(height: 24),
         ElevatedButton(
@@ -377,24 +376,23 @@ class _AuthWrapperState extends State<AuthWrapper> {
   }
 
  Widget _buildLogo() {
-    // Consistent logo for both login and signup if desired, or can be different
     return Column(
       children: [
         Container(
-          padding: const EdgeInsets.all(16), // Slightly larger padding
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.primaryContainer,
             shape: BoxShape.circle,
           ),
           child: Icon(
-            Icons.store_mall_directory_outlined, // Icon representing UMKM/Store
+            Icons.store_mall_directory_outlined,
             size: 48,
             color: Theme.of(context).colorScheme.onPrimaryContainer,
           ),
         ),
         const SizedBox(height: 12),
         Text(
-          'UMKM Portal', // Generic name
+          'UMKM Portal',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
         )
       ],
@@ -408,7 +406,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
     required String hintText,
     TextInputType keyboardType = TextInputType.text,
     bool enabled = true,
-    // FormFieldValidator<String>? validator, // Optional: Add validator
   }) {
     return TextFormField(
       controller: controller,
@@ -430,11 +427,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 2.0),
         ),
-        filled: !enabled, // Only fill if disabled for visual cue
+        filled: !enabled,
         fillColor: Colors.grey[200],
         contentPadding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 12.0),
       ),
-      // validator: validator, // Use if you pass a validator
     );
   }
 
@@ -444,7 +440,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
     required bool obscureText,
     required VoidCallback onToggleVisibility,
     required int minLength,
-    // FormFieldValidator<String>? validator, // Optional: Add validator
   }) {
     return TextFormField(
       controller: controller,
@@ -474,15 +469,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
         ),
         contentPadding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 12.0),
       ),
-      // validator: validator ?? (value) { // Default validator if none provided
-      //   if (value == null || value.isEmpty) {
-      //     return '$label cannot be empty';
-      //   }
-      //   if (value.length < minLength) {
-      //     return '$label must be at least $minLength characters';
-      //   }
-      //   return null;
-      // },
     );
   }
 }

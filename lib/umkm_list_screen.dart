@@ -3,15 +3,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'api.dart';
-import 'umkm_detail_screen.dart'; // To show UMKM details
+import 'umkm_detail_screen.dart'; 
 
 class UmkmInfo {
   final int id;
   final String ownerName;
   final String email;
   final String umkmName;
-  final String contact; // Standardized field name
+  final String contact; 
   final bool isInvestable;
+  final String? umkmDescription;
+  final String? umkmProfileImageUrl;
+
 
   UmkmInfo({
     required this.id,
@@ -20,6 +23,8 @@ class UmkmInfo {
     required this.umkmName,
     required this.contact,
     required this.isInvestable,
+    this.umkmDescription,
+    this.umkmProfileImageUrl,
   });
 
   factory UmkmInfo.fromJson(Map<String, dynamic> json) {
@@ -28,8 +33,10 @@ class UmkmInfo {
       ownerName: json['name']?.toString() ?? 'N/A',
       email: json['email']?.toString() ?? 'N/A',
       umkmName: json['umkm_name']?.toString() ?? 'Unnamed UMKM',
-      contact: json['contact']?.toString() ?? 'No Contact', // <<< Ensure this uses 'contact'
+      contact: json['contact']?.toString() ?? 'No Contact',
       isInvestable: json['is_investable'] as bool? ?? false,
+      umkmDescription: json['umkm_description'] as String?,
+      umkmProfileImageUrl: json['umkm_profile_image_url'] as String?,
     );
   }
 }
@@ -156,7 +163,7 @@ class _UmkmListScreenState extends State<UmkmListScreen> {
               icon: const Icon(Icons.refresh_rounded),
               label: const Text("Refresh"),
               onPressed: _fetchUmkmList,
-              style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.secondary.withOpacity(0.1), foregroundColor: theme.colorScheme.secondary),
+              style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.secondary.withAlpha(26), foregroundColor: theme.colorScheme.secondary),
             )
           ]),
         ),
@@ -171,23 +178,33 @@ class _UmkmListScreenState extends State<UmkmListScreen> {
         itemCount: _umkmList.length,
         itemBuilder: (context, index) {
           final umkm = _umkmList[index];
+          Widget leadingWidget;
+          if (umkm.umkmProfileImageUrl != null && umkm.umkmProfileImageUrl!.isNotEmpty) {
+            leadingWidget = CircleAvatar(
+              backgroundImage: NetworkImage(umkm.umkmProfileImageUrl!),
+              backgroundColor: theme.colorScheme.secondary.withAlpha(38),
+            );
+          } else {
+            leadingWidget = CircleAvatar(
+              backgroundColor: theme.colorScheme.secondary.withAlpha(38),
+              child: Text(
+                umkm.umkmName.isNotEmpty ? umkm.umkmName[0].toUpperCase() : "U",
+                style: TextStyle(color: theme.colorScheme.secondary, fontWeight: FontWeight.bold),
+              ),
+            );
+          }
+
           return Card(
             margin: const EdgeInsets.symmetric(vertical: 6.0),
             child: ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              leading: CircleAvatar(
-                backgroundColor: theme.colorScheme.secondary.withOpacity(0.15),
-                child: Text(
-                  umkm.umkmName.isNotEmpty ? umkm.umkmName[0].toUpperCase() : "U",
-                  style: TextStyle(color: theme.colorScheme.secondary, fontWeight: FontWeight.bold),
-                ),
-              ),
+              leading: leadingWidget,
               title: Text(umkm.umkmName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text("Owner: ${umkm.ownerName}", style: TextStyle(fontSize: 13, color: Colors.grey[700])),
-                  Text("Contact: ${umkm.contact}", style: TextStyle(fontSize: 13, color: Colors.grey[600])), // Use umkm.contact
+                  Text("Contact: ${umkm.contact}", style: TextStyle(fontSize: 13, color: Colors.grey[600])),
                 ],
               ),
               trailing: Icon(Icons.chevron_right_rounded, color: Colors.grey[400]),

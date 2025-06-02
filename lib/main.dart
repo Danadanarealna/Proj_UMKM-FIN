@@ -16,6 +16,8 @@ import 'delete_transaction_screen.dart';
 import 'update_transaction_screen.dart';
 import 'analysis_screen.dart';
 import 'profile_screen.dart';
+import 'add_debt_screen.dart';
+
 
 enum SortCriteria {
   dateAscending,
@@ -26,6 +28,14 @@ enum SortCriteria {
   sequenceIdAscending,
   sequenceIdDescending,
 }
+
+enum DebtSortCriteria {
+  deadlineAscending,
+  deadlineDescending,
+  amountAscending,
+  amountDescending,
+}
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,7 +59,7 @@ class FinanceDashboardApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.indigo,
           primary: Colors.indigo,
-          secondary: Colors.teal,
+          secondary: const Color.fromARGB(255, 62, 13, 139),
           surface: const Color(0xFFF8FAFC),
           onPrimary: Colors.white,
           onSecondary: Colors.white,
@@ -135,12 +145,18 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedIndex = 0;
   List<Transaction> _allTransactions = [];
-  bool _isLoading = true;
+  List<DebtModel> _allDebts = [];
+  bool _isLoadingTransactions = true;
+  bool _isLoadingDebts = true;
+
   String _userName = "UMKM User";
   String _userEmail = "";
   String _umkmName = "";
   String _umkmContact = "";
   bool _isUmkmInvestable = false;
+  String? _umkmDescription;
+  String? _umkmProfileImageUrl;
+
 
   @override
   void initState() {
@@ -150,7 +166,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadInitialData() async {
     await _loadUserData();
-    await _fetchTransactions();
+    await Future.wait([
+      _fetchTransactions(),
+      _fetchDebts(),
+    ]);
   }
 
   Future<void> _loadUserData() async {
@@ -159,24 +178,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (userDataString != null) {
       final data = jsonDecode(userDataString);
       if (mounted) {
-        setState(() {
-          _userName = data['name'] ?? 'UMKM User';
-          _userEmail = data['email'] ?? '';
-          _umkmName = data['umkm_name'] ?? '';
-          _umkmContact = data['contact'] ?? '';
-          _isUmkmInvestable = data['is_investable'] as bool? ?? false;
-        });
+        _updateStateWithUserData(data);
       }
     } else {
       await _fetchCurrentUser();
     }
   }
+  
+  void _updateStateWithUserData(Map<String, dynamic> data) {
+     setState(() {
+        _userName = data['name'] ?? 'UMKM User';
+        _userEmail = data['email'] ?? '';
+        _umkmName = data['umkm_name'] ?? '';
+        _umkmContact = data['contact'] ?? '';
+        _isUmkmInvestable = data['is_investable'] as bool? ?? false;
+        _umkmDescription = data['umkm_description'];
+        _umkmProfileImageUrl = data['umkm_profile_image_url'];
+      });
+  }
+
 
   Future<void> _fetchCurrentUser() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('token');
     if (token == null) {
-      _showAuthError();
+      if(mounted) {
+        _showAuthError();
+      }
       return;
     }
     try {
@@ -188,29 +216,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
           await prefs.setString('user_data', jsonEncode(data));
-          setState(() {
-            _userName = data['name'] ?? _userName;
-            _userEmail = data['email'] ?? _userEmail;
-            _umkmName = data['umkm_name'] ?? _umkmName;
-            _umkmContact = data['contact'] ?? _umkmContact;
-            _isUmkmInvestable = data['is_investable'] as bool? ?? false;
-          });
+          _updateStateWithUserData(data);
         } else {
           _showAuthError();
         }
       }
     } catch (e) {
-      if (mounted) _showError('Failed to fetch user details: ${e.toString()}');
+      if (mounted) {
+        _showError('Failed to fetch user details: ${e.toString()}');
+      }
     }
   }
 
   Future<void> _fetchTransactions() async {
-    if (mounted) setState(() => _isLoading = true);
+    if (mounted) {
+      setState(() => _isLoadingTransactions = true);
+    }
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('token');
 
     if (token == null) {
-      if (mounted) _showAuthError();
+      if (mounted) {
+        _showAuthError();
+      }
       return;
     }
     try {
@@ -224,19 +252,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final List<dynamic> data = jsonDecode(response.body);
           setState(() {
             _allTransactions = data.map((t) => Transaction.fromJson(t)).toList();
-            _isLoading = false;
           });
         } else {
           _showError('Failed to load transactions: ${response.statusCode}\n${response.body}');
-          setState(() => _isLoading = false);
         }
       }
     } catch (e) {
-      if (mounted) _showError('An unexpected error occurred: ${e.toString()}');
+      if (mounted) {
+        _showError('An unexpected error occurred while fetching transactions: ${e.toString()}');
+      }
     } finally {
-      if (mounted && _isLoading) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoadingTransactions = false);
+      }
     }
   }
+
+  Future<void> _fetchDebts() async {
+    if (mounted) {
+      setState(() => _isLoadingDebts = true);
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+
+    if (token == null) {
+      if (mounted) {
+        _showAuthError();
+      }
+      return;
+    }
+    try {
+      final response = await http.get(
+        Uri.parse('$apiBaseUrl/debts'),
+        headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'},
+      ).timeout(const Duration(seconds: 20));
+
+      if (mounted) {
+        if (response.statusCode == 200) {
+          final List<dynamic> data = jsonDecode(response.body);
+          setState(() {
+            _allDebts = data.map((d) => DebtModel.fromJson(d)).toList();
+          });
+        } else {
+          _showError('Failed to load debts: ${response.statusCode}\n${response.body}');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _showError('An unexpected error occurred while fetching debts: ${e.toString()}');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingDebts = false);
+      }
+    }
+  }
+
 
   void _showError(String message) {
     if (!mounted) return;
@@ -245,17 +316,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _showAuthError() {
+  void _showAuthError() async {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Authentication error. Please log in again.')),
     );
-    AppState().clearUserSession().then((_) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const AuthWrapper()),
-        (Route<dynamic> route) => false,
-      );
-    });
+    await AppState().clearUserSession();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => const AuthWrapper()),
+      (Route<dynamic> route) => false,
+    );
   }
 
   void _onItemTapped(int index) {
@@ -274,7 +345,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'},
         );
       } catch (e) {
-        // Error during API logout
+        
       }
     }
     await AppState().clearUserSession();
@@ -286,13 +357,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // CORRECTED SIGNATURE AND IMPLEMENTATION for _onUmkmProfileUpdated
-  void _onUmkmProfileUpdated(String newUmkmName, String newContact, String newOwnerName, bool newIsInvestable) async {
+  void _onUmkmProfileUpdated(String newUmkmName, String newUmkmContact, String newOwnerName, bool newIsInvestable, String? newDescription, String? newImageUrl) async {
     setState(() {
       _umkmName = newUmkmName;
-      _umkmContact = newContact;
+      _umkmContact = newUmkmContact;
       _userName = newOwnerName;
-      _isUmkmInvestable = newIsInvestable; // Update the state
+      _isUmkmInvestable = newIsInvestable;
+      _umkmDescription = newDescription;
+      _umkmProfileImageUrl = newImageUrl;
     });
     final prefs = await SharedPreferences.getInstance();
     final userDataString = prefs.getString('user_data');
@@ -300,42 +372,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
       Map<String, dynamic> userData = jsonDecode(userDataString);
       userData['name'] = newOwnerName;
       userData['umkm_name'] = newUmkmName;
-      userData['contact'] = newContact;
-      userData['is_investable'] = newIsInvestable; // Save the updated value
+      userData['contact'] = newUmkmContact;
+      userData['is_investable'] = newIsInvestable;
+      userData['umkm_description'] = newDescription;
+      userData['umkm_profile_image_url'] = newImageUrl;
       await prefs.setString('user_data', jsonEncode(userData));
+      AppState().setUserData(userData);
     }
-    // Optionally, call _fetchCurrentUser() or _loadUserData() if you want to re-verify with backend,
-    // but for now, just updating local state and SharedPreferences.
-    // await _loadUserData(); // This would re-fetch and re-set state including isInvestable
   }
 
   Widget _buildBody() {
+    final bool isLoading = _isLoadingTransactions || _isLoadingDebts;
     final List<Widget> screens = [
       HomeScreen(
-        key: ValueKey('home_${_allTransactions.length}_$_isLoading'),
+        key: ValueKey('home_${_allTransactions.length}_${_allDebts.length}_$isLoading'),
         username: _userName,
         transactions: _allTransactions,
-        onRefresh: _fetchTransactions,
-        isLoading: _isLoading,
+        debts: _allDebts,
+        onRefreshAll: _loadInitialData,
+        isLoading: isLoading,
       ),
       AnalysisScreen(
-        key: ValueKey('analysis_${_allTransactions.length}'),
+        key: ValueKey('analysis_${_allTransactions.length}_${_allDebts.length}'),
         allTransactions: _allTransactions,
-        onRefresh: _fetchTransactions,
+        allDebts: _allDebts,
+        onRefresh: _loadInitialData,
       ),
       ProfileScreen(
-        key: ValueKey('profile_$_umkmName$_umkmContact$_userName$_isUmkmInvestable'),
+        key: ValueKey('profile_$_umkmName$_umkmContact$_userName$_isUmkmInvestable$_umkmDescription$_umkmProfileImageUrl'),
         username: _userName,
         email: _userEmail,
         umkmName: _umkmName,
         umkmContact: _umkmContact,
-        isInvestable: _isUmkmInvestable, // Pass the correct state variable
+        isInvestable: _isUmkmInvestable,
+        umkmDescription: _umkmDescription,
+        umkmProfileImageUrl: _umkmProfileImageUrl,
         onLogout: _handleLogout,
         onProfileUpdated: _onUmkmProfileUpdated,
         onRefresh: _loadUserData,
       ),
     ];
-    if (_isLoading && _selectedIndex == 0 && _allTransactions.isEmpty) {
+    if (isLoading && _selectedIndex == 0 && _allTransactions.isEmpty && _allDebts.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
     return IndexedStack(index: _selectedIndex, children: screens);
@@ -358,6 +435,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 }
+class DebtModel {
+  final int id;
+  final double amount;
+  final DateTime date;
+  final DateTime deadline;
+  final String status;
+  final String? notes;
+  final int? relatedTransactionId;
+
+  DebtModel({
+    required this.id,
+    required this.amount,
+    required this.date,
+    required this.deadline,
+    required this.status,
+    this.notes,
+    this.relatedTransactionId,
+  });
+
+  factory DebtModel.fromJson(Map<String, dynamic> json) {
+    return DebtModel(
+      id: json['id'] as int,
+      amount: (json['amount'] as num).toDouble(),
+      date: DateTime.parse(json['date']),
+      deadline: DateTime.parse(json['deadline']),
+      status: json['status'] as String,
+      notes: json['notes'] as String?,
+      relatedTransactionId: json['related_transaction_id'] as int?,
+    );
+  }
+}
+
 
 class Transaction {
   final String id;
@@ -366,6 +475,8 @@ class Transaction {
   final String status;
   final DateTime date;
   final String type;
+  final String? paymentMethod; // Added paymentMethod
+  final String? notes;
   final bool isIncome;
 
   Transaction({
@@ -375,19 +486,21 @@ class Transaction {
     required this.status,
     required this.date,
     required this.type,
+    this.paymentMethod, // Added paymentMethod
+    this.notes,
     required this.isIncome,
   });
 
   factory Transaction.fromJson(Map<String, dynamic> json) {
     DateTime parsedDate;
     try {
-      if (json['date'] != null && json['date'].toString().contains(' ')) {
-        parsedDate = DateFormat('dd MMM yy', 'en_US').parseStrict(json['date']);
-      } else {
-        parsedDate = DateTime.parse(json['date']);
-      }
+      parsedDate = DateTime.parse(json['date']);
     } catch (e) {
-      parsedDate = DateTime.now();
+      try {
+         parsedDate = DateFormat('dd MMM yy', 'en_US').parseStrict(json['date']);
+      } catch (e2) {
+        parsedDate = DateTime.now();
+      }
     }
     return Transaction(
       id: json['id']?.toString() ?? '',
@@ -396,7 +509,9 @@ class Transaction {
       status: json['status']?.toString() ?? 'Unknown',
       date: parsedDate,
       type: json['type']?.toString() ?? 'Unknown',
-      isIncome: ((json['amount'] as num?)?.toDouble() ?? 0.0) > 0,
+      paymentMethod: json['payment_method'] as String?, // Added paymentMethod
+      notes: json['notes'] as String?,
+      isIncome: ((json['amount'] as num?)?.toDouble() ?? 0.0) > 0 && (json['type']?.toString().toLowerCase() != 'expense'),
     );
   }
 }
@@ -404,14 +519,16 @@ class Transaction {
 class HomeScreen extends StatefulWidget {
   final String username;
   final List<Transaction> transactions;
-  final Future<void> Function() onRefresh;
+  final List<DebtModel> debts;
+  final Future<void> Function() onRefreshAll;
   final bool isLoading;
 
   const HomeScreen({
     super.key,
     required this.username,
     required this.transactions,
-    required this.onRefresh,
+    required this.debts,
+    required this.onRefreshAll,
     required this.isLoading,
   });
 
@@ -426,7 +543,12 @@ class _HomeScreenState extends State<HomeScreen> {
   String _selectedAmount = '';
   String _selectedStatus = '';
   String _selectedDate = '';
+  String _selectedNotes = '';
+  String _selectedPaymentMethod = ''; // Added for detail view
+
   SortCriteria _sortCriteria = SortCriteria.sequenceIdDescending;
+  DebtSortCriteria _debtSortCriteria = DebtSortCriteria.deadlineAscending;
+
 
   List<Transaction> get _filteredAndSortedTransactions {
     List<Transaction> filtered = widget.transactions
@@ -453,12 +575,33 @@ class _HomeScreenState extends State<HomeScreen> {
         filtered.sort((a,b) => (a.userSequenceId ?? 0).compareTo(b.userSequenceId ?? 0));
         break;
       case SortCriteria.sequenceIdDescending:
-      default:
          filtered.sort((a,b) => (b.userSequenceId ?? 0).compareTo(a.userSequenceId ?? 0));
         break;
+      
     }
     return filtered;
   }
+  
+  List<DebtModel> get _sortedDebts {
+    List<DebtModel> pendingDebts = widget.debts.where((d) => d.status == 'pending_verification').toList();
+    switch(_debtSortCriteria) {
+      case DebtSortCriteria.deadlineDescending:
+        pendingDebts.sort((a,b) => b.deadline.compareTo(a.deadline));
+        break;
+      case DebtSortCriteria.amountAscending:
+        pendingDebts.sort((a,b) => a.amount.compareTo(b.amount));
+        break;
+      case DebtSortCriteria.amountDescending:
+        pendingDebts.sort((a,b) => b.amount.compareTo(a.amount));
+        break;
+      case DebtSortCriteria.deadlineAscending:
+        pendingDebts.sort((a,b) => a.deadline.compareTo(b.deadline));
+        break;
+      
+    }
+    return pendingDebts;
+  }
+
 
   double get _totalIncome => widget.transactions
       .where((t) => t.isIncome && (t.status == 'Done'))
@@ -476,6 +619,8 @@ class _HomeScreenState extends State<HomeScreen> {
           '${transaction.amount > 0 ? '+' : '-'} \$${transaction.amount.abs().toStringAsFixed(2)}';
       _selectedStatus = transaction.status;
       _selectedDate = DateFormat('dd MMM yy').format(transaction.date);
+      _selectedNotes = transaction.notes ?? 'No notes';
+      _selectedPaymentMethod = transaction.paymentMethod ?? 'N/A'; // Added
     });
   }
 
@@ -484,6 +629,15 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'Pending': return const Color(0xFFFFFBEB);
       case 'Done': return const Color(0xFFF0FDF4);
       case 'Cancelled': return const Color(0xFFFEF2F2);
+      default: return Colors.grey.shade100;
+    }
+  }
+  
+  Color _getDebtStatusColor(String status) {
+    switch (status) {
+      case 'pending_verification': return const Color(0xFFFFFBEB);
+      case 'verified_income_recorded': return const Color(0xFFF0FDF4);
+      case 'cancelled': return const Color(0xFFFEF2F2);
       default: return Colors.grey.shade100;
     }
   }
@@ -497,6 +651,68 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Color _getDebtStatusTextColor(String status) {
+    switch (status) {
+      case 'pending_verification': return const Color(0xFFB45309);
+      case 'verified_income_recorded': return const Color(0xFF15803D);
+      case 'cancelled': return const Color(0xFFB91C1C);
+      default: return Colors.grey.shade700;
+    }
+  }
+
+  Future<void> _verifyDebt(int debtId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+    
+    http.Response? responseFromApi;
+    String? caughtError;
+
+    if (token == null) {
+      caughtError = 'Authentication error.';
+    } else {
+      if(mounted){ 
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Verifying debt ID: $debtId...'), duration: const Duration(seconds: 2)),
+        );
+      }
+      try {
+        responseFromApi = await http.patch(
+          Uri.parse('$apiBaseUrl/debts/$debtId/verify'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Accept': 'application/json',
+          },
+        );
+      } catch (e) {
+        caughtError = 'Error verifying debt: $e';
+      }
+    }
+
+    if (!mounted) return;
+
+    if (caughtError != null) {
+       ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(caughtError), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    if (responseFromApi != null) {
+      if (responseFromApi.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Debt verified and income recorded!'), backgroundColor: Colors.green),
+        );
+        widget.onRefreshAll();
+      } else {
+        final errorData = jsonDecode(responseFromApi.body);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to verify debt: ${errorData['message'] ?? responseFromApi.statusCode}'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -505,7 +721,7 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Selamat Datang,', style: theme.textTheme.titleSmall?.copyWith(color: Colors.grey[600])),
+            Text('Welcome,', style: theme.textTheme.titleSmall?.copyWith(color: Colors.grey[600])),
             Text(widget.username, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
           ],
         ),
@@ -521,28 +737,44 @@ class _HomeScreenState extends State<HomeScreen> {
                   builder: (context) => AddTransactionScreen(isIncome: _showIncome),
                 ),
               );
-              if (result == true) widget.onRefresh();
+              if (result == true && mounted) widget.onRefreshAll();
+            },
+          ),
+          const SizedBox(width: 8),
+           _ActionButton(
+            icon: Icons.post_add_outlined,
+            tooltip: 'Add Debt (Receivable)',
+            color: Colors.orange.shade700,
+            onPressed: () async {
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AddDebtScreen()),
+              );
+              if (result == true && mounted) widget.onRefreshAll();
             },
           ),
           const SizedBox(width: 8),
           _ActionButton(
-            icon: Icons.delete_sweep_outlined,
+            icon: Icons.delete_sweep_outlined, 
             tooltip: 'Delete Transaction',
             color: theme.colorScheme.error,
             onPressed: () async {
               if (widget.transactions.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('No transactions to delete.')),
-                );
+                 if(mounted){
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('No transactions to delete.')),
+                    );
+                 }
                 return;
               }
+              
               final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => DeleteTransactionScreen(transactions: widget.transactions),
+                  builder: (context) => DeleteTransactionScreen(transactions: _filteredAndSortedTransactions), 
                 ),
               );
-              if (result == true) widget.onRefresh();
+              if (result == true && mounted) widget.onRefreshAll();
             },
           ),
           const SizedBox(width: 8),
@@ -553,9 +785,11 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () async {
               final pending = widget.transactions.where((t) => t.status == 'Pending').toList();
               if (pending.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('No pending transactions to verify.')),
-                );
+                 if(mounted){
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('No pending transactions to verify.')),
+                    );
+                 }
                 return;
               }
               final result = await Navigator.push(
@@ -564,8 +798,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   builder: (context) => UpdateTransactionScreen(pendingTransactions: pending),
                 ),
               );
-              if (result != null && result is Map && result['success'] == true) {
-                widget.onRefresh();
+              if (result != null && result is Map && result['success'] == true && mounted) {
+                widget.onRefreshAll();
               }
             },
           ),
@@ -573,7 +807,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: widget.onRefresh,
+        onRefresh: widget.onRefreshAll,
         color: theme.colorScheme.primary,
         child: CustomScrollView(
           slivers: [
@@ -592,7 +826,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(vertical: 16),
                                 decoration: BoxDecoration(
-                                  color: _showIncome ? theme.colorScheme.primary.withOpacity(0.1) : Colors.transparent,
+                                  color: _showIncome ? theme.colorScheme.primary.withAlpha(26) : Colors.transparent,
                                   borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), bottomLeft: Radius.circular(12)),
                                 ),
                                 child: Column(children: [
@@ -611,7 +845,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(vertical: 16),
                                 decoration: BoxDecoration(
-                                  color: !_showIncome ? theme.colorScheme.error.withOpacity(0.1) : Colors.transparent,
+                                  color: !_showIncome ? theme.colorScheme.error.withAlpha(26) : Colors.transparent,
                                   borderRadius: const BorderRadius.only(topRight: Radius.circular(12), bottomRight: Radius.circular(12)),
                                 ),
                                 child: Column(children: [
@@ -644,6 +878,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               _DetailRow(label: 'ID:', value: _selectedDisplayId),
                               _DetailRow(label: 'Amount:', value: _selectedAmount, valueStyle: TextStyle(fontWeight: FontWeight.w600, color: _selectedAmount.startsWith('+') ? Colors.green[700] : Colors.red[700])),
                               _DetailRow(label: 'Date:', value: _selectedDate),
+                              _DetailRow(label: 'Payment Method:', value: _selectedPaymentMethod), // Added
+                               _DetailRow(label: 'Notes:', value: _selectedNotes),
                               _DetailRow(
                                 label: 'Status:',
                                 valueWidget: Container(
@@ -682,19 +918,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-            widget.isLoading && widget.transactions.isEmpty
+            widget.isLoading && widget.transactions.isEmpty && widget.debts.isEmpty
                 ? SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: theme.colorScheme.primary)))
                 : _filteredAndSortedTransactions.isEmpty
-                    ? SliverFillRemaining(
+                    ? SliverToBoxAdapter(
                         child: Center(
                           child: Padding(
-                            padding: const EdgeInsets.all(20.0),
+                            padding: const EdgeInsets.all(20.0).copyWith(top:0),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(Icons.receipt_long_outlined, size: 60, color: Colors.grey[400]),
                                 const SizedBox(height: 16),
-                                Text('No transactions found.', style: TextStyle(fontSize: 17, color: Colors.grey[600])),
+                                Text('No transactions found for this category.', style: TextStyle(fontSize: 17, color: Colors.grey[600])),
                                 Text(_showIncome ? 'Try adding an income transaction.' : 'Try adding an expense transaction.', style: TextStyle(fontSize: 14, color: Colors.grey[500])),
                               ],
                             ),
@@ -716,7 +952,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     child: Row(
                                       children: [
                                         CircleAvatar(
-                                          backgroundColor: transaction.isIncome ? Colors.green.withOpacity(0.15) : Colors.red.withOpacity(0.15),
+                                          backgroundColor: transaction.isIncome ? Colors.green.withAlpha(38) : Colors.red.withAlpha(38),
                                           child: Icon(transaction.isIncome ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded, color: transaction.isIncome ? Colors.green.shade700 : Colors.red.shade700, size: 20),
                                         ),
                                         const SizedBox(width: 12),
@@ -760,6 +996,110 @@ class _HomeScreenState extends State<HomeScreen> {
                           childCount: _filteredAndSortedTransactions.length,
                         ),
                       ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+                 child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Pending Debts (Receivables)', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600)),
+                        PopupMenuButton<DebtSortCriteria>(
+                          onSelected: (DebtSortCriteria criteria) => setState(() => _debtSortCriteria = criteria),
+                          icon: Icon(Icons.sort_rounded, color: Colors.grey[700]),
+                          itemBuilder: (BuildContext context) => <PopupMenuEntry<DebtSortCriteria>>[
+                            const PopupMenuItem<DebtSortCriteria>(value: DebtSortCriteria.deadlineAscending, child: Text('Sort by Deadline (Soonest)')),
+                            const PopupMenuItem<DebtSortCriteria>(value: DebtSortCriteria.deadlineDescending, child: Text('Sort by Deadline (Latest)')),
+                            const PopupMenuItem<DebtSortCriteria>(value: DebtSortCriteria.amountDescending, child: Text('Sort by Amount (High-Low)')),
+                            const PopupMenuItem<DebtSortCriteria>(value: DebtSortCriteria.amountAscending, child: Text('Sort by Amount (Low-High)')),
+                          ],
+                          tooltip: "Sort Debts",
+                        ),
+                      ],
+                    ),
+              )
+            ),
+             widget.isLoading && widget.debts.isEmpty
+                ? SliverToBoxAdapter(child: Center(child: Padding(padding: const EdgeInsets.all(16.0), child: CircularProgressIndicator(color: theme.colorScheme.primary))))
+                : _sortedDebts.isEmpty
+                    ? SliverToBoxAdapter(
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(20.0),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.money_off_csred_outlined, size: 60, color: Colors.grey[400]),
+                                const SizedBox(height: 16),
+                                Text('No pending debts to display.', style: TextStyle(fontSize: 17, color: Colors.grey[600])),
+                              ],
+                            ),
+                          ),
+                        ),
+                      )
+                    : SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            final debt = _sortedDebts[index];
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+                              child: Card(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12.0),
+                                  child: Row(
+                                    children: [
+                                      CircleAvatar(
+                                        backgroundColor: Colors.orange.withAlpha(38),
+                                        child: Icon(Icons.receipt_long, color: Colors.orange.shade700, size: 20),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Debt ID: ${debt.id}',
+                                              style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text('Deadline: ${DateFormat('dd MMM yy').format(debt.deadline)}', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                                             if (debt.notes != null && debt.notes!.isNotEmpty) ...[
+                                                const SizedBox(height: 2),
+                                                Text('Notes: ${debt.notes}', style: TextStyle(fontSize: 12, color: Colors.grey[600], fontStyle: FontStyle.italic),  maxLines: 1, overflow: TextOverflow.ellipsis,),
+                                            ]
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          Text(
+                                            '\$${debt.amount.toStringAsFixed(2)}',
+                                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.orange.shade800),
+                                          ),
+                                          const SizedBox(height: 2),
+                                           Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(color: _getDebtStatusColor(debt.status), borderRadius: BorderRadius.circular(15)),
+                                              child: Text(debt.status.replaceAll('_', ' ').capitalizeFirstLetter(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: _getDebtStatusTextColor(debt.status))),
+                                            ),
+                                        ],
+                                      ),
+                                      if (debt.status == 'pending_verification')
+                                        IconButton(
+                                          icon: Icon(Icons.check_circle_outline, color: Colors.green.shade600),
+                                          tooltip: 'Verify & Record Income',
+                                          onPressed: () => _verifyDebt(debt.id),
+                                        )
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                          childCount: _sortedDebts.length,
+                        ),
+                      ),
             SliverToBoxAdapter(child: const SizedBox(height: 20)),
           ],
         ),
@@ -767,6 +1107,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+extension StringExtension on String {
+    String capitalizeFirstLetter() {
+      if (isEmpty) {
+        return this;
+      }
+      return "${this[0].toUpperCase()}${substring(1)}";
+    }
+}
+
 
 class _ActionButton extends StatelessWidget {
   final IconData icon;
@@ -808,15 +1157,12 @@ class _DetailRow extends StatelessWidget {
   final String? value;
   final Widget? valueWidget;
   final TextStyle? valueStyle;
-  final bool isMonospace;
 
   const _DetailRow({
     required this.label,
     this.value,
     this.valueWidget,
     this.valueStyle,
-    this.isMonospace = false,
-    super.key,
   }) : assert(value != null || valueWidget != null);
 
   @override
@@ -833,7 +1179,7 @@ class _DetailRow extends StatelessWidget {
             child: Align(
               alignment: Alignment.centerRight,
               child: value != null
-                  ? Text(value!, textAlign: TextAlign.end, style: valueStyle ?? TextStyle(fontSize: 14, fontWeight: FontWeight.w500, fontFamily: isMonospace ? 'monospace' : null))
+                  ? Text(value!, textAlign: TextAlign.end, style: valueStyle ?? const TextStyle(fontSize: 14, fontWeight: FontWeight.w500))
                   : valueWidget!,
             ),
           ),
@@ -844,10 +1190,41 @@ class _DetailRow extends StatelessWidget {
 }
 
 Future<void> launchWhatsApp({required String phone, required String message}) async {
-  String url = "https://wa.me/$phone?text=${Uri.encodeComponent(message)}";
-  if (await canLaunchUrl(Uri.parse(url))) {
-    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-  } else {
-    throw 'Could not launch $url';
+  String sanitizedPhone = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+  if (sanitizedPhone.startsWith('0')) {
+    sanitizedPhone = '62${sanitizedPhone.substring(1)}';
+  } else if (!sanitizedPhone.startsWith('+') && !sanitizedPhone.startsWith('62')) {
+    sanitizedPhone = '62$sanitizedPhone';
+  }
+  
+  if (sanitizedPhone.startsWith('+') && sanitizedPhone.length > 1 && sanitizedPhone.substring(1).contains('+')) {
+      sanitizedPhone = sanitizedPhone.substring(0,1) + sanitizedPhone.substring(1).replaceAll('+', '');
+  } else if (!sanitizedPhone.startsWith('+')) {
+      sanitizedPhone = sanitizedPhone.replaceAll('+', '');
+  }
+
+
+  final Uri whatsappUri = Uri(
+    scheme: 'whatsapp',
+    path: 'send',
+    queryParameters: {
+      'phone': sanitizedPhone,
+      'text': message,
+    },
+  );
+
+  final Uri httpsUri = Uri.parse("https://wa.me/$sanitizedPhone?text=${Uri.encodeComponent(message)}");
+
+
+  try {
+    if (await canLaunchUrl(whatsappUri)) {
+      await launchUrl(whatsappUri);
+    } else if (await canLaunchUrl(httpsUri)) {
+      await launchUrl(httpsUri, mode: LaunchMode.externalApplication);
+    } else {
+      throw 'Could not launch $whatsappUri or $httpsUri';
+    }
+  } catch (e) {
+    throw 'Could not launch WhatsApp: $e';
   }
 }

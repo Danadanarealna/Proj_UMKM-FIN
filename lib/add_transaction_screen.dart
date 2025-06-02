@@ -15,10 +15,13 @@ class AddTransactionScreen extends StatefulWidget {
 
 class _AddTransactionScreenState extends State<AddTransactionScreen> {
   final _formKey = GlobalKey<FormState>();
-  String _selectedType = 'Cash';
+  String _selectedPaymentMethod = 'Cash';
   String _selectedStatus = 'Pending';
   DateTime _selectedDate = DateTime.now();
   final TextEditingController _amountController = TextEditingController();
+  final TextEditingController _notesController = TextEditingController();
+  bool _isLoading = false;
+
 
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
@@ -34,87 +37,166 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     }
   }
 
+  Future<void> _submitTransaction() async {
+    if (_formKey.currentState!.validate()) {
+      setState(() => _isLoading = true);
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+
+      if (token == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Authentication error. Please login again.'), backgroundColor: Colors.red),
+          );
+          setState(() => _isLoading = false);
+        }
+        return;
+      }
+
+      String transactionType = widget.isIncome ? 'Income' : 'Expense';
+      String notes = _notesController.text.trim();
+
+      try {
+        final response = await http.post(
+          Uri.parse('$apiBaseUrl/transactions'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: jsonEncode({
+            'amount': widget.isIncome
+                ? double.parse(_amountController.text)
+                : -double.parse(_amountController.text),
+            'type': transactionType, 
+            'payment_method': _selectedPaymentMethod,
+            'status': _selectedStatus,
+            'date': DateFormat('yyyy-MM-dd').format(_selectedDate),
+            'notes': notes, 
+          }),
+        );
+
+        if (mounted) {
+           setState(() => _isLoading = false);
+          if (response.statusCode == 200 || response.statusCode == 201) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('$transactionType transaction added successfully!'), backgroundColor: Colors.green),
+            );
+            Navigator.pop(context, true);
+          } else {
+            final errorData = jsonDecode(response.body);
+            String errorMessage = errorData['message'] ?? 'Failed to add transaction.';
+            if (errorData['errors'] != null && errorData['errors'] is Map) {
+                Map<String,dynamic> errors = errorData['errors'];
+                if(errors.isNotEmpty){
+                    errorMessage = errors.values.first[0];
+                }
+            }
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Network error: ${e.toString()}'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Add Transaction')),
+      appBar: AppBar(title: Text('Add ${widget.isIncome ? "Income" : "Expense"}')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
           key: _formKey,
-          child: Column(
+          child: ListView(
             children: [
+              TextFormField(
+                controller: _amountController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Amount',
+                  prefixIcon: Icon(Icons.attach_money_outlined),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Amount is required';
+                  }
+                  if (double.tryParse(value) == null) {
+                    return 'Invalid amount';
+                  }
+                  if (double.parse(value) <= 0) {
+                    return 'Amount must be positive';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _selectedType,
-                items: ['Cash', 'Credit'].map((String value) {
+                value: _selectedPaymentMethod,
+                items: ['Cash', 'Credit', 'Bank Transfer', 'E-Wallet', 'Other'].map((String value) {
                   return DropdownMenuItem<String>(
                     value: value,
                     child: Text(value),
                   );
                 }).toList(),
-                onChanged: (value) => setState(() => _selectedType = value!),
-                decoration: const InputDecoration(labelText: 'Type'),
+                onChanged: (value) => setState(() => _selectedPaymentMethod = value!),
+                decoration: const InputDecoration(
+                  labelText: 'Payment Method',
+                  prefixIcon: Icon(Icons.payment_outlined),
+                ),
               ),
-              TextFormField(
-                controller: _amountController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Amount'),
-                validator: (value) => value!.isEmpty ? 'Required' : null,
-              ),
+              const SizedBox(height: 16),
               ListTile(
-                title: Text(DateFormat('dd MMM yyyy').format(_selectedDate)),
-                trailing: const Icon(Icons.calendar_today),
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.calendar_today_outlined),
+                title: Text('Date: ${DateFormat('dd MMM yy').format(_selectedDate)}'),
+                trailing: const Icon(Icons.arrow_drop_down),
                 onTap: () => _selectDate(context),
               ),
+              const SizedBox(height: 16),
               DropdownButtonFormField<String>(
                 value: _selectedStatus,
-                items: ['Done', 'Pending'].map((String value) {
+                items: ['Done', 'Pending', 'Cancelled'].map((String value) {
                   return DropdownMenuItem<String>(
                     value: value,
                     child: Text(value),
                   );
                 }).toList(),
                 onChanged: (value) => setState(() => _selectedStatus = value!),
-                decoration: const InputDecoration(labelText: 'Status'),
+                decoration: const InputDecoration(
+                  labelText: 'Status',
+                  prefixIcon: Icon(Icons.flag_outlined),
+                ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _notesController,
+                decoration: const InputDecoration(
+                  labelText: 'Notes (Optional)',
+                  prefixIcon: Icon(Icons.note_alt_outlined),
+                  alignLabelWithHint: true,
+                ),
+                maxLines: 3,
+                minLines: 1,
+              ),
+              const SizedBox(height: 30),
               ElevatedButton(
-                onPressed: () async {
-                if (_formKey.currentState!.validate()) {
-                final prefs = await SharedPreferences.getInstance();
-                final token = prefs.getString('token');
-
-                try {
-                  final response = await http.post(
-                    Uri.parse('$apiBaseUrl/transactions'),
-                    headers: {
-                      'Authorization': 'Bearer $token',
-                      'Content-Type': 'application/json'
-                    },
-                    body: jsonEncode({  'amount': widget.isIncome 
-                          ? double.parse(_amountController.text)
-                          : -double.parse(_amountController.text),
-                      'type': _selectedType,
-                      'status': _selectedStatus,
-                      'date': DateFormat('dd MMM yyyy').format(_selectedDate),
-                    }),
-                  );
-                  if (response.statusCode == 200 || response.statusCode == 201) {
-                    if (mounted) Navigator.pop(context, true);
-                  } else {
-                    final error = jsonDecode(response.body)['message'] ?? 'Transaction failed';
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(error)),
-                    );
-                  }
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Network error')),
-                  );
-                }
-              }
-              },
-                child: const Text('Add Transaction'),
+                onPressed: _isLoading ? null : _submitTransaction,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16)
+                ),
+                child: _isLoading
+                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3,))
+                  : Text('Add ${widget.isIncome ? "Income" : "Expense"}'),
               ),
             ],
           ),

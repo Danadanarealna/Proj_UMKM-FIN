@@ -1,19 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart'; // For date formatting if needed for display
-import 'main.dart'; // Assuming Transaction class is here
-
-// Import a charting library if you want more advanced charts.
-// For this example, a simple custom bar chart is used.
-// Example:
-// import 'package:fl_chart/fl_chart.dart';
+import 'package:intl/intl.dart'; 
+import 'main.dart'; 
 
 class AnalysisScreen extends StatefulWidget {
   final List<Transaction> allTransactions;
+  final List<DebtModel> allDebts;
   final Future<void> Function() onRefresh;
 
   const AnalysisScreen({
     super.key,
     required this.allTransactions,
+    required this.allDebts,
     required this.onRefresh,
   });
 
@@ -25,44 +22,65 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   List<Transaction> get _pendingTransactions => widget.allTransactions
       .where((transaction) => transaction.status == 'Pending')
       .toList();
+      
+  List<DebtModel> get _pendingVerificationDebts => widget.allDebts
+      .where((debt) => debt.status == 'pending_verification')
+      .toList()..sort((a,b) => a.deadline.compareTo(b.deadline));
 
-  // Calculate total income from 'Done' transactions
+
   double get _totalIncome => widget.allTransactions
       .where((t) => t.isIncome && t.status == 'Done')
       .fold(0.0, (sum, t) => sum + t.amount.abs());
 
-  // Calculate total expense from 'Done' transactions
   double get _totalExpense => widget.allTransactions
       .where((t) => !t.isIncome && t.status == 'Done')
       .fold(0.0, (sum, t) => sum + t.amount.abs());
 
-  // Helper to get status color for UI consistency
   Color _getStatusColor(String status) {
     switch (status) {
       case 'Pending':
-        return const Color(0xFFFFFBEB); // Lighter Yellow (Tailwind amber-50)
+        return const Color(0xFFFFFBEB); 
       case 'Done':
-        return const Color(0xFFF0FDF4); // Lighter Green (Tailwind green-50)
+        return const Color(0xFFF0FDF4); 
       case 'Cancelled':
-        return const Color(0xFFFEF2F2); // Lighter Red (Tailwind red-50)
+        return const Color(0xFFFEF2F2); 
       default:
         return Colors.grey.shade100;
     }
   }
+  
+  Color _getDebtStatusColor(String status) {
+    switch (status) {
+      case 'pending_verification': return const Color(0xFFFFFBEB); 
+      case 'verified_income_recorded': return const Color(0xFFF0FDF4);
+      case 'cancelled': return const Color(0xFFFEF2F2);
+      default: return Colors.grey.shade100;
+    }
+  }
 
-  // Helper to get status text color
+
   Color _getStatusTextColor(String status) {
     switch (status) {
       case 'Pending':
-        return const Color(0xFFB45309); // Darker Yellow/Orange (Tailwind amber-700)
+        return const Color(0xFFB45309); 
       case 'Done':
-        return const Color(0xFF15803D); // Darker Green (Tailwind green-700)
+        return const Color(0xFF15803D); 
       case 'Cancelled':
-        return const Color(0xFFB91C1C); // Darker Red (Tailwind red-700)
+        return const Color(0xFFB91C1C); 
       default:
         return Colors.grey.shade700;
     }
   }
+
+  Color _getDebtStatusTextColor(String status) {
+    switch (status) {
+      case 'pending_verification': return const Color(0xFFB45309); 
+      case 'verified_income_recorded': return const Color(0xFF15803D); 
+      case 'cancelled': return const Color(0xFFB91C1C); 
+      default: return Colors.grey.shade700;
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -83,6 +101,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
               const SizedBox(height: 24),
               _buildPendingTransactionsCard(theme),
               const SizedBox(height: 24),
+              _buildPendingDebtsCard(theme),
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -98,7 +118,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Financial Overview',
+              'Financial Overview (Completed Transactions)',
               style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
@@ -106,7 +126,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
               children: [
                 Expanded(
                   child: _buildSummaryFigure(
-                    "Total Income (Done)",
+                    "Total Income",
                     _totalIncome,
                     Icons.arrow_circle_down_rounded,
                     Colors.green.shade700,
@@ -116,7 +136,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: _buildSummaryFigure(
-                    "Total Expense (Done)",
+                    "Total Expense",
                     _totalExpense,
                     Icons.arrow_circle_up_rounded,
                     Colors.red.shade700,
@@ -127,7 +147,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             ),
             const SizedBox(height: 20),
             Text(
-              'Income vs Expense (Completed Transactions)',
+              'Income vs Expense',
               style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 16),
@@ -156,9 +176,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withAlpha(20),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.3))
+        border: Border.all(color: color.withAlpha(77))
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -186,14 +206,14 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
   Widget _buildSimpleBarChart(double income, double expense, ThemeData theme) {
     double maxValue = (income > expense ? income : expense);
-    if (maxValue == 0) maxValue = 1; // Avoid division by zero for proportions
+    if (maxValue == 0) maxValue = 1;
 
     double incomeBarHeight = income > 0 ? (income / maxValue * 150).clamp(10.0, 150.0) : 0;
     double expenseBarHeight = expense > 0 ? (expense / maxValue * 150).clamp(10.0, 150.0) : 0;
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final barWidth = constraints.maxWidth / 4.5; // Adjust for spacing
+        final barWidth = constraints.maxWidth / 4.5;
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -223,9 +243,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             borderRadius: const BorderRadius.only(topLeft: Radius.circular(6), topRight: Radius.circular(6)),
           ),
         ),
-        // Label is now part of the legend
-        // const SizedBox(height: 6),
-        // Text(label, style: theme.textTheme.labelSmall?.copyWith(color: Colors.grey[600])),
       ],
     );
   }
@@ -250,7 +267,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: isPositive ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+        color: isPositive ? Colors.green.withAlpha(26) : Colors.red.withAlpha(26),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -297,7 +314,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             ),
             const SizedBox(height: 12),
             Container(
-              constraints: const BoxConstraints(maxHeight: 300), // Limit height for scrollability
+              constraints: const BoxConstraints(maxHeight: 300),
               decoration: BoxDecoration(
                 border: Border.all(color: Colors.grey.shade300),
                 borderRadius: BorderRadius.circular(8),
@@ -317,15 +334,15 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                       ),
                     )
                   : ListView.separated(
-                      shrinkWrap: true, // Important for ListView inside SingleChildScrollView with bounded height
+                      shrinkWrap: true,
                       itemCount: _pendingTransactions.length,
                       itemBuilder: (context, index) {
                         final transaction = _pendingTransactions[index];
                         return ListTile(
                           leading: CircleAvatar(
                             backgroundColor: transaction.isIncome
-                                ? Colors.green.withOpacity(0.1)
-                                : Colors.red.withOpacity(0.1),
+                                ? Colors.green.withAlpha(26)
+                                : Colors.red.withAlpha(26),
                             child: Icon(
                               transaction.isIncome ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
                               color: transaction.isIncome ? Colors.green.shade600 : Colors.red.shade600,
@@ -333,11 +350,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                             ),
                           ),
                           title: Text(
-                            'ID: ${transaction.id.length > 15 ? '${transaction.id.substring(0,8)}...' : transaction.id}',
-                            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13, fontFamily: 'monospace', color: Colors.grey),
+                            'ID: ${transaction.userSequenceId ?? transaction.id.substring(0,8)}',
+                            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13, color: Colors.grey),
                           ),
                           subtitle: Text(
-                            DateFormat('dd MMM, yyyy').format(transaction.date),
+                            DateFormat('dd MMM, yy').format(transaction.date),
                             style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                           ),
                           trailing: Text(
@@ -348,7 +365,91 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                               color: transaction.isIncome ? Colors.green.shade700 : Colors.red.shade700,
                             ),
                           ),
-                          // You might want to add an onTap to view/update the pending transaction
+                        );
+                      },
+                      separatorBuilder: (context, index) => Divider(height: 1, indent: 16, endIndent: 16, color: Colors.grey[200]),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPendingDebtsCard(ThemeData theme) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Pending Debts (Receivables)',
+                  style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                Chip(
+                  label: Text('${_pendingVerificationDebts.length} items'),
+                  backgroundColor: _getDebtStatusColor('pending_verification'),
+                  labelStyle: TextStyle(color: _getDebtStatusTextColor('pending_verification'), fontSize: 12, fontWeight: FontWeight.w500),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                  visualDensity: VisualDensity.compact,
+                )
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 300),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade300),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: _pendingVerificationDebts.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 30.0),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.money_off_csred_outlined, size: 50, color: Colors.grey[400]),
+                            const SizedBox(height: 12),
+                            Text('No pending debts to verify.', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
+                          ],
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: _pendingVerificationDebts.length,
+                      itemBuilder: (context, index) {
+                        final debt = _pendingVerificationDebts[index];
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.orange.withAlpha(26),
+                            child: Icon(
+                              Icons.receipt_long_outlined,
+                              color: Colors.orange.shade700,
+                              size: 20,
+                            ),
+                          ),
+                          title: Text(
+                            'Debt ID: ${debt.id}',
+                            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13, color: Colors.grey),
+                          ),
+                          subtitle: Text(
+                            'Deadline: ${DateFormat('dd MMM, yy').format(debt.deadline)}',
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          ),
+                          trailing: Text(
+                            '\$${debt.amount.abs().toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange.shade800,
+                            ),
+                          ),
                         );
                       },
                       separatorBuilder: (context, index) => Divider(height: 1, indent: 16, endIndent: 16, color: Colors.grey[200]),
